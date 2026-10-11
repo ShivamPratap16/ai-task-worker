@@ -1,0 +1,15 @@
+{% extends "mail_base.html" %}
+{% block title %}{{ email.subject }} - AP Mailbox{% endblock %}
+{% block content %}
+<h1>{{ email.subject }}</h1>
+<p><strong>From:</strong> {{ email.from_name }} &lt;{{ email.from }}&gt;<br>
+<strong>To:</strong> ap@acme.example<br>
+<strong>Received:</strong> {{ email.date }}</p>
+<pre class="body">{{ email.body }}</pre>
+{% if email.attachments %}
+<h3>Attachments</h3>
+<ul>{% for a in email.attachments %}<li><a href="/mail/attachments/{{ a }}" download>{{ a }}</a></li>{% endfor %}</ul>
+{% endif %}
+<a class="btn" href="/mail/{{ email.id }}/reply">Reply</a>
+<a class="btn btn-secondary" href="/mail">Back to inbox</a>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sign in - FinOps ERP{% endblock %}
+{% block header %}<header><span class="brand">FinOps ERP</span></header>{% endblock %}
+{% block content %}
+<h1>Sign in to FinOps</h1>
+{% if info %}<div class="alert alert-info" role="status">{{ info }}</div>{% endif %}
+{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+<form method="post" action="/erp/login">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label for="username">Username</label><input id="username" name="username" autocomplete="username">
+  <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
+  <button type="submit">Sign in</button>
+</form>
+{% endblock %}

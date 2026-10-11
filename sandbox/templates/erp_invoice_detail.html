@@ -1,0 +1,21 @@
+{% extends "erp_base.html" %}
+{% block title %}Invoice {{ inv.number }} - FinOps ERP{% endblock %}
+{% block content %}
+{% if created %}<div class="alert alert-success" role="status">Invoice {{ inv.number }} was saved.</div>{% endif %}
+{% if submitted %}<div class="alert alert-success" role="status">Invoice {{ inv.number }} was submitted for payment.</div>{% endif %}
+<h1>Invoice {{ inv.number }}</h1>
+<table>
+  <tr><th>Record ID</th><td>{{ inv.id }}</td></tr>
+  <tr><th>Vendor</th><td>{{ inv.vendor_name }}</td></tr>
+  <tr><th>Amount</th><td>{{ inv.currency }} {{ "%.2f"|format(inv.amount) }}</td></tr>
+  <tr><th>Invoice date</th><td>{{ inv.invoice_date }}</td></tr>
+  <tr><th>Due date</th><td>{{ inv.due_date }}</td></tr>
+  <tr><th>Status</th><td>{{ inv.status }}</td></tr>
+  <tr><th>Notes</th><td>{{ inv.notes }}</td></tr>
+  <tr><th>Created by</th><td>{{ inv.created_by }}</td></tr>
+</table>
+{% if inv.status == "Pending" %}
+<form method="post" action="/erp/invoices/{{ inv.id }}/submit"><button class="btn-danger" type="submit">Submit for payment</button></form>
+{% endif %}
+<p><a href="/erp/invoices">Back to invoices</a></p>
+{% endblock %}

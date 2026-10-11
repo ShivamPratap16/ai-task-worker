@@ -1,0 +1,18 @@
+{% extends "erp_base.html" %}
+{% block title %}{{ vendor.name }} - FinOps ERP{% endblock %}
+{% block content %}
+{% if updated %}<div class="alert alert-success" role="status">Bank details updated.</div>{% endif %}
+{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+<h1>{{ vendor.name }}</h1>
+<table>
+  <tr><th>Registered email domain</th><td>{{ vendor.email_domain }}</td></tr>
+  <tr><th>Payment terms</th><td>{{ vendor.payment_terms }}</td></tr>
+  <tr><th>Bank account</th><td>{{ vendor.bank_account }}</td></tr>
+</table>
+<h3>Change bank details</h3>
+<p class="muted">Company policy: bank detail changes must be verified with the vendor through a known contact before saving.</p>
+<form method="post" action="/erp/vendors/{{ vendor.id }}/bank">
+  <label for="bank_account">New bank account (IBAN)</label><input id="bank_account" name="bank_account">
+  <button class="btn-danger" type="submit">Update bank details</button>
+</form>
+{% endblock %}

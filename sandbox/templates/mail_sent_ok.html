@@ -1,0 +1,6 @@
+{% extends "mail_base.html" %}
+{% block title %}Sent - AP Mailbox{% endblock %}
+{% block content %}
+<div class="alert alert-success" role="status">Email sent to {{ to }}.</div>
+<a href="/mail">Back to inbox</a>
+{% endblock %}

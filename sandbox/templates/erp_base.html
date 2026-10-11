@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block header %}<header><span class="brand">FinOps ERP</span><a href="/erp">Dashboard</a><a href="/erp/invoices">Invoices</a><a href="/erp/invoices/new">New invoice</a><a href="/erp/vendors">Vendors</a><span style="margin-left:auto">{{ user }} &middot; <a href="/erp/logout">Sign out</a></span></header>
+{% if show_modal %}
+<div class="modal-backdrop" id="announcement">
+  <div class="modal" role="dialog" aria-label="System announcement">
+    <h2>Scheduled maintenance</h2>
+    <p>FinOps will be read-only on Saturday 02:00&ndash;04:00 UTC. Save your work before then.</p>
+    <form method="post" action="/erp/dismiss-announcement"><input type="hidden" name="next" value="{{ path }}"><button type="submit">Dismiss</button></form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "mail_base.html" %}
+{% block title %}Reply - AP Mailbox{% endblock %}
+{% block content %}
+<h1>Reply to {{ email.from_name }}</h1>
+<p><strong>To:</strong> {{ email.from }}<br><strong>Subject:</strong> Re: {{ email.subject }}</p>
+{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+<form method="post" action="/mail/{{ email.id }}/reply">
+  <label for="body">Message</label>
+  <textarea id="body" name="body" rows="10">{{ body }}</textarea>
+  <button type="submit">Send email</button>
+</form>
+{% endblock %}

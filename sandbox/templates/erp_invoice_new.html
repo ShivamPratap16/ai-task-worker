@@ -1,0 +1,26 @@
+{% extends "erp_base.html" %}
+{% block title %}New invoice - FinOps ERP{% endblock %}
+{% block content %}
+<h1>Record a vendor invoice</h1>
+{% if errors %}<div class="alert alert-error" role="alert"><strong>Please fix the following:</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+<form method="post" action="/erp/invoices">
+  <label for="vendor_id">Vendor</label>
+  <select id="vendor_id" name="vendor_id">
+    <option value="">-- select vendor --</option>
+    {% for v in vendors %}<option value="{{ v.id }}" {% if form.vendor_id == v.id|string %}selected{% endif %}>{{ v.name }}</option>{% endfor %}
+  </select>
+  <div class="row">
+    <div><label for="number">Invoice number</label><input id="number" name="number" value="{{ form.number or '' }}"></div>
+    <div><label for="amount">Amount (total due)</label><input id="amount" name="amount" value="{{ form.amount or '' }}" placeholder="e.g. 1234.56"></div>
+    <div><label for="currency">Currency</label>
+      <select id="currency" name="currency"><option value="">--</option>
+      {% for c in ["USD", "EUR", "GBP"] %}<option value="{{ c }}" {% if form.currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="row">
+    <div><label for="invoice_date">Invoice date</label><input id="invoice_date" name="invoice_date" value="{{ form.invoice_date or '' }}" placeholder="YYYY-MM-DD"></div>
+    <div><label for="due_date">Due date</label><input id="due_date" name="due_date" value="{{ form.due_date or '' }}" placeholder="YYYY-MM-DD"></div>
+  </div>
+  <label for="notes">Notes</label><textarea id="notes" name="notes" rows="2">{{ form.notes or '' }}</textarea>
+  <button type="submit">Save invoice</button>
+</form>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "erp_base.html" %}
+{% block title %}Invoices - FinOps ERP{% endblock %}
+{% block content %}
+<h1>Invoices</h1>
+<form method="get" action="/erp/invoices" role="search" class="row">
+  <div><label for="q">Search</label><input id="q" name="q" value="{{ q }}" placeholder="Invoice number, vendor or notes"></div>
+  <div><label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">Any</option>
+      {% for s in ["Pending", "Submitted for payment", "Paid"] %}<option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select></div>
+  <div><button type="submit">Filter</button></div>
+</form>
+<table>
+  <thead><tr><th>Number</th><th>Vendor</th><th>Amount</th><th>Invoice date</th><th>Due date</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td><a href="/erp/invoices/{{ r.id }}">{{ r.number }}</a></td><td>{{ r.vendor_name }}</td>
+        <td>{{ r.currency }} {{ "%.2f"|format(r.amount) }}</td><td>{{ r.invoice_date }}</td><td>{{ r.due_date }}</td><td>{{ r.status }}</td></tr>
+  {% else %}
+    <tr><td colspan="6">No invoices match.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

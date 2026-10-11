@@ -1,0 +1,26 @@
+{% extends "mail_base.html" %}
+{% block title %}Inbox - AP Mailbox{% endblock %}
+{% block content %}
+<h1>Inbox</h1>
+<form method="get" action="/mail" role="search">
+  <label for="q">Search mail</label>
+  <input id="q" name="q" value="{{ q }}" placeholder="Sender, subject or text">
+  <button type="submit">Search</button>
+</form>
+{% if q %}<p class="muted">{{ emails|length }} result(s) for "{{ q }}" &middot; <a href="/mail">clear search</a></p>{% endif %}
+<table>
+  <thead><tr><th>Received</th><th>From</th><th>Subject</th><th>Attachments</th></tr></thead>
+  <tbody>
+  {% for e in emails %}
+    <tr>
+      <td>{{ e.date }}</td>
+      <td>{{ e.from_name }} &lt;{{ e.from }}&gt;</td>
+      <td><a href="/mail/{{ e.id }}">{{ e.subject }}</a></td>
+      <td>{{ e.attachments|length }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">No messages found.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

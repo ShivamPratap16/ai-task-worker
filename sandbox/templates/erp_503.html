@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}503 Service Unavailable{% endblock %}
+{% block header %}<header><span class="brand">FinOps ERP</span></header>{% endblock %}
+{% block content %}
+<h1>503 &mdash; Service temporarily unavailable</h1>
+<div class="alert alert-error" role="alert">FinOps could not process your request because the service is overloaded. Your changes were NOT saved. Please try again.</div>
+<a href="/erp">Return to dashboard</a>
+{% endblock %}

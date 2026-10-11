@@ -1,0 +1,8 @@
+{% extends "erp_base.html" %}
+{% block title %}Dashboard - FinOps ERP{% endblock %}
+{% block content %}
+<h1>Accounts payable dashboard</h1>
+<table><tr><th>Pending</th><th>Submitted for payment</th><th>Paid</th></tr>
+<tr><td>{{ stats.pending }}</td><td>{{ stats.submitted }}</td><td>{{ stats.paid }}</td></tr></table>
+<p><a class="btn" href="/erp/invoices/new">Record a new invoice</a> <a class="btn btn-secondary" href="/erp/invoices">View invoices</a></p>
+{% endblock %}

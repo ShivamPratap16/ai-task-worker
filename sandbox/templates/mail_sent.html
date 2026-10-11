@@ -1,0 +1,8 @@
+{% extends "mail_base.html" %}
+{% block title %}Sent - AP Mailbox{% endblock %}
+{% block content %}
+<h1>Sent</h1>
+{% for s in sent %}
+  <div style="border-bottom:1px solid #e3e6eb;padding:8px 0"><strong>To:</strong> {{ s.to }} &middot; <strong>{{ s.subject }}</strong><pre class="body">{{ s.body }}</pre></div>
+{% else %}<p>No sent messages.</p>{% endfor %}
+{% endblock %}
