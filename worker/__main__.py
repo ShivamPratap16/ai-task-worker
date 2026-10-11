@@ -2,6 +2,7 @@
 
     python -m worker run "Find the latest invoice from Globex ..."   # terminal mode
     python -m worker serve                                           # dashboard on :8000
+    python -m worker check                                           # test the LLM key (1 request)
 """
 from __future__ import annotations
 
@@ -55,6 +56,39 @@ def cmd_run(args) -> int:
     return 0 if result.outcome == "completed_verified" else 1
 
 
+def cmd_check(args) -> int:
+    """One cheap request: confirms the key, the model name and tool calling all work."""
+    from worker.llm import LLMError, ToolSpec, make_provider
+    from worker.runner import new_event_loop
+
+    settings = Settings.from_env()
+    print(f"Provider: {settings.model_label()}  (rate limit: {settings.resolved_rpm() or 'none'} req/min)")
+    provider = make_provider(settings)
+    convo = provider.conversation("You are a connectivity test.", [ToolSpec(
+        "ping", "Echo a message.", {"type": "object", "properties": {"message": {"type": "string"}},
+                                    "required": ["message"], "additionalProperties": False})])
+    convo.add_user_text("Call the ping tool with message 'ok'. Do not reply with text.")
+    async def probe():
+        try:
+            return await convo.complete()
+        finally:
+            await provider.aclose()
+    loop = new_event_loop()
+    try:
+        turn = loop.run_until_complete(probe())
+    except LLMError as exc:
+        print(f"FAILED: {exc}")
+        return 1
+    finally:
+        loop.close()
+    if turn.tool_calls and turn.tool_calls[0].name == "ping":
+        print(f"OK: tool calling works ({turn.model}; {turn.usage.input_tokens} in / {turn.usage.output_tokens} out tokens)")
+        return 0
+    print(f"WARNING: the model answered without calling the tool: {turn.text[:200]!r}. "
+          "It may be too weak for this agent; try another model.")
+    return 1
+
+
 def cmd_serve(args) -> int:
     import uvicorn
     uvicorn.run("worker.server:app", host="127.0.0.1", port=args.port, log_level="warning")
@@ -68,6 +102,8 @@ def main() -> int:
     p_run.add_argument("task")
     p_run.add_argument("--headed", action="store_true", help="show the browser window")
     p_run.set_defaults(fn=cmd_run)
+    p_check = sub.add_parser("check", help="verify the LLM key/model with one tiny request")
+    p_check.set_defaults(fn=cmd_check)
     p_serve = sub.add_parser("serve", help="start the dashboard")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.set_defaults(fn=cmd_serve)

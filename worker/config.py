@@ -22,6 +22,30 @@ def _load_dotenv(path: Path) -> None:
 _load_dotenv(ROOT / ".env")
 
 
+@dataclass(frozen=True)
+class ProviderInfo:
+    """How to reach one LLM provider. All non-Anthropic providers speak the OpenAI
+    Chat Completions protocol, so they share one adapter with a different base_url."""
+    key_env: str                 # env var holding the API key
+    default_model: str
+    base_url: str | None = None  # None = the SDK's default endpoint
+    default_rpm: int = 0         # client-side requests/minute cap (0 = none); free tiers need one
+    free_tier: bool = False
+
+
+PROVIDERS: dict[str, ProviderInfo] = {
+    "anthropic": ProviderInfo("ANTHROPIC_API_KEY", "claude-opus-5-5"),
+    "gemini": ProviderInfo("GEMINI_API_KEY", "gemini-2.5-flash",
+                           base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                           default_rpm=8, free_tier=True),
+    "openai": ProviderInfo("OPENAI_API_KEY", "gpt-5.4"),
+    # Any OpenAI-compatible server: Ollama (http://localhost:11434/v1), OpenRouter, Groq, vLLM, ...
+    "openai_compatible": ProviderInfo("LLM_API_KEY", "", base_url=None),
+}
+# Auto-detection order when WORKER_PROVIDER is not set: best model first, then free.
+AUTO_DETECT_ORDER = ("anthropic", "gemini", "openai")
+
+
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     return default if raw is None else raw.strip().lower() in {"1", "true", "yes", "on"}
@@ -30,10 +54,12 @@ def _bool(name: str, default: bool) -> bool:
 @dataclass
 class Settings:
     # LLM
-    provider: str = ""                     # "anthropic" | "openai"; empty = auto-detect from keys
-    anthropic_model: str = "claude-opus-5-5"
-    anthropic_effort: str = "high"
-    openai_model: str = "gpt-5.4"
+    provider: str = ""                     # key of PROVIDERS; empty = auto-detect from available keys
+    model: str = ""                        # empty = the provider's default model
+    anthropic_effort: str = "high"         # Claude: low | medium | high | xhigh | max
+    reasoning_effort: str = ""             # OpenAI-protocol reasoning models: low | medium | high
+    base_url: str = ""                     # overrides the provider's endpoint (needed for openai_compatible)
+    rpm: int = -1                          # requests/minute cap; -1 = provider default, 0 = unlimited
     # Agent loop budgets
     max_steps: int = 60
     max_verification_rounds: int = 2
@@ -56,10 +82,12 @@ class Settings:
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
         s = cls(
-            provider=os.environ.get("WORKER_PROVIDER", ""),
-            anthropic_model=os.environ.get("ANTHROPIC_MODEL", cls.anthropic_model),
+            provider=os.environ.get("WORKER_PROVIDER", "").strip().lower(),
+            model=os.environ.get("LLM_MODEL", ""),
             anthropic_effort=os.environ.get("ANTHROPIC_EFFORT", cls.anthropic_effort),
-            openai_model=os.environ.get("OPENAI_MODEL", cls.openai_model),
+            reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", ""),
+            base_url=os.environ.get("LLM_BASE_URL", ""),
+            rpm=int(os.environ.get("LLM_RPM", "-1")),
             max_steps=int(os.environ.get("WORKER_MAX_STEPS", cls.max_steps)),
             headless=_bool("WORKER_HEADLESS", True),
             approval_mode=os.environ.get("WORKER_APPROVAL_MODE", cls.approval_mode),
@@ -74,10 +102,27 @@ class Settings:
 
     def resolved_provider(self) -> str:
         if self.provider:
+            if self.provider not in PROVIDERS:
+                raise RuntimeError(f"Unknown WORKER_PROVIDER {self.provider!r}; choose from {sorted(PROVIDERS)}")
             return self.provider
-        if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-            return "anthropic"
-        if os.environ.get("OPENAI_API_KEY"):
-            return "openai"
-        raise RuntimeError("No LLM credentials found: set ANTHROPIC_API_KEY or OPENAI_API_KEY "
-                           "(or WORKER_PROVIDER explicitly).")
+        for name in AUTO_DETECT_ORDER:
+            if os.environ.get(PROVIDERS[name].key_env) or (name == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+                return name
+        raise RuntimeError("No LLM configured. Put one key in .env: ANTHROPIC_API_KEY, GEMINI_API_KEY (free tier), "
+                           "or OPENAI_API_KEY - or set WORKER_PROVIDER=openai_compatible with LLM_BASE_URL/LLM_MODEL.")
+
+    def resolved_model(self) -> str:
+        name = self.resolved_provider()
+        model = self.model or PROVIDERS[name].default_model
+        if not model:
+            raise RuntimeError(f"Set LLM_MODEL for provider {name!r}.")
+        return model
+
+    def resolved_rpm(self) -> int:
+        return PROVIDERS[self.resolved_provider()].default_rpm if self.rpm < 0 else self.rpm
+
+    def model_label(self) -> str:
+        try:
+            return f"{self.resolved_provider()} / {self.resolved_model()}"
+        except RuntimeError as exc:
+            return f"not configured: {exc}"

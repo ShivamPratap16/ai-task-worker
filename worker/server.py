@@ -56,11 +56,7 @@ def examples():
 
 
 def _provider_label() -> str:
-    try:
-        name = settings.resolved_provider()
-    except RuntimeError as exc:
-        return f"not configured: {exc}"
-    return f"{name} / {settings.anthropic_model if name == 'anthropic' else settings.openai_model}"
+    return settings.model_label()
 
 
 @app.post("/api/runs")

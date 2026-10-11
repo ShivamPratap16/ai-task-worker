@@ -139,3 +139,28 @@ can be trusted (verifier vs ground-truth agreement).
 **Decision.** Each run executes on its own thread with its own asyncio loop (Proactor on Windows).
 **Why.** Playwright needs subprocess support, which the selector loop some ASGI servers install on Windows
 lacks. Isolation also means one hung run can't stall the dashboard or other runs.
+
+### D16. Pluggable providers, including a free tier, behind a registry
+**Decision.** `config.PROVIDERS` lists each provider in one entry: key variable, default model, endpoint,
+default rate limit. Claude has its own adapter. Gemini, OpenAI and any OpenAI-compatible server (Ollama,
+OpenRouter, Groq) share one Chat Completions adapter that differs only by base URL. Auto-detection order is
+Anthropic > Gemini > OpenAI. `python -m worker check` validates a setup with a single request.
+**Why.** Cost matters to the builder (the prototype must be testable for free) and to the business (the model is a
+swappable dependency, not the product). The free Gemini tier makes development possible at $0. Supporting any
+OpenAI-compatible endpoint covers local and self-hosted models with no new code.
+**Provider quirks are handled in the adapter:**
+- Free tiers have a per-minute request cap, so a process-wide sliding-window limiter paces requests.
+- A 429 can mean two different things: "daily quota or credit gone" is fatal and stops the run immediately,
+  while "per-minute limit" waits and retries.
+- Some compatible backends reject `additionalProperties` in tool schemas, so schemas are sanitized.
+- Some backends omit tool-call ids, so ids are generated.
+
+**Cost.** Free-tier models are weaker than Opus 5.5, and the daily quota limits how many eval runs fit in a
+day. The README states which model produced each result.
+
+### D17. Cache the whole conversation on Claude, not just the system prompt
+**Decision.** In addition to the breakpoint on the static system prompt, requests set top-level
+`cache_control` so the growing history (every earlier page snapshot) is read from cache on the next step.
+**Why.** An agent re-sends its entire history every step. Without history caching, a 25-step task paid
+full input price for roughly 700k tokens. With it, each step pays full price only for the newest turn,
+roughly 4–5x cheaper per task. I found this while estimating test costs, before any money was spent.

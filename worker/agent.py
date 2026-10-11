@@ -101,6 +101,7 @@ class Worker:
             recorder.emit("error", where="worker", message=f"{type(exc).__name__}: {exc}")
         finally:
             await browser.close()
+            await self.provider.aclose()
 
         result.facts = dict(ctx.memory.facts)
         result.duration_s = round(time.time() - started, 1)

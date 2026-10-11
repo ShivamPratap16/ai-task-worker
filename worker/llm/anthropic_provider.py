@@ -4,6 +4,9 @@ Design notes:
   * The native transcript is append-only and assistant turns are appended as the
     raw `response.content` blocks, so thinking blocks are echoed back unchanged
     (required on Claude Opus 5.5 for thinking to stay valid across turns).
+  * Two cache layers: an explicit breakpoint on the static system prompt and
+    automatic caching of the conversation prefix, so every step pays full price
+    only for the newest turn (roughly 4-5x cheaper per task than uncached).
   * Adaptive thinking with summarized display: we surface the summary in the UI
     as the agent's reasoning, which makes decisions explainable.
   * Optional server features (refusal fallbacks, server-side clearing of old tool
@@ -96,6 +99,9 @@ class AnthropicProvider(LLMProvider):
             messages=messages,
             thinking={"type": "adaptive", "display": "summarized"},
             output_config={"effort": self.effort},
+            # Automatic caching of the growing conversation: each step re-reads the history
+            # from cache instead of paying full input price for every earlier page snapshot.
+            cache_control={"type": "ephemeral"},
         )
         betas = []
         if self.optional_features["fallbacks"]:

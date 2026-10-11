@@ -90,3 +90,9 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def conversation(self, system: str, tools: list[ToolSpec]) -> Conversation: ...
+
+    async def aclose(self) -> None:
+        """Release network resources (HTTP connection pools)."""
+        client = getattr(self, "client", None)
+        if client is not None and hasattr(client, "close"):
+            await client.close()

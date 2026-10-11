@@ -28,7 +28,8 @@ python -m venv .venv
 pip install -r requirements.txt
 python -m playwright install chromium   # optional if Chrome/Edge is installed
 
-copy .env.example .env             # then set ANTHROPIC_API_KEY (or OPENAI_API_KEY)
+copy .env.example .env             # then set ONE key - see "Choosing a model" below
+python -m worker check             # verifies key + model + tool calling with one tiny request
 
 python start.py                    # sandbox on :8001 + dashboard on :8000 (opens your browser)
 ```
@@ -43,10 +44,21 @@ Other entry points:
 python -m worker run "Log every vendor invoice in the AP mailbox that isn't in FinOps yet." --headed
 python -m sandbox --chaos hostile          # sandbox only; chaos: off | realistic | hostile
 python -m evals.run_evals                  # eval suite (needs the sandbox running)
-python -m pytest                           # 21 tests, no API key needed (~30 s)
+python -m pytest                           # 31 tests, no API key needed (~40 s)
 ```
 
 The sandbox is also usable by hand at http://127.0.0.1:8001 (ERP login: `ap.agent` / `Acme!2026`).
+
+### Choosing a model (including free)
+
+| Provider | Set in `.env` | Cost | Notes |
+|---|---|---|---|
+| **Google Gemini** (free tier) | `GEMINI_API_KEY` from [aistudio.google.com](https://aistudio.google.com) | **Free** | Requests are paced to stay under the per-minute limit (default 8/min). The daily quota is a few hundred requests, roughly 4–6 full tasks a day. |
+| Anthropic Claude | `ANTHROPIC_API_KEY` | Paid, about $1–3 per task on Opus 5.5 | Best quality. Default model `claude-opus-5-5` |
+| OpenAI | `OPENAI_API_KEY` | Paid | Default `gpt-5.4` |
+| Any OpenAI-compatible server | `WORKER_PROVIDER=openai_compatible`, `LLM_BASE_URL`, `LLM_MODEL` | Free when local | Ollama, OpenRouter, Groq, vLLM. Small local models struggle with long multi-step tasks |
+
+Override the model with `LLM_MODEL=...`. The agent code is identical for all of them; only the adapter differs.
 
 ---
 
@@ -66,8 +78,10 @@ The sandbox is also usable by hand at http://127.0.0.1:8001 (ERP login: `ap.agen
      ┌──────────────────────▼─┐   ┌─────────▼──────────────────────────────────────────────┐
      │ Conversation interface │   │ ToolExecutor: validate → POLICY → run → retry/backoff →  │
      │  ├ Claude adapter      │   │   classify errors → screenshot evidence → event          │
-     │  ├ OpenAI adapter      │   │ Tools: browser_* · read_document · remember · update_plan │
-     │  └ Scripted (tests)    │   │        ask_human · save_lesson · finish                  │
+     │  ├ OpenAI-protocol     │   │                                                          │
+     │  │ (Gemini/OpenAI/    │   │ Tools: browser_* · read_document · remember · update_plan │
+     │  │  Ollama/OpenRouter)│   │        ask_human · save_lesson · finish                  │
+     │  └ Scripted (tests)    │   │                                                          │
      └────────────────────────┘   └─────────┬───────────────────────────┬──────────────────┘
                                             │ Playwright                │ policy.py
                                   ┌─────────▼─────────┐        URL allowlist · risky-action
@@ -90,7 +104,7 @@ The sandbox is also usable by hand at http://127.0.0.1:8001 (ERP login: `ap.agen
 | `worker/policy.py` | URL allowlist, high-impact action detection, read-only mode |
 | `worker/verifier.py` | Independent auditor agent and verdict |
 | `worker/memory.py` | Working memory, company context, lessons, credential vault |
-| `worker/llm/` | Provider-neutral conversation; Claude, OpenAI and scripted adapters |
+| `worker/llm/` | Provider-neutral conversation; Claude, OpenAI-protocol (Gemini/OpenAI/Ollama/...) and scripted adapters |
 | `worker/events.py` | Append-only event log (the single source of truth for a run) |
 | `worker/server.py`, `ui/` | Dashboard: live timeline, plan, memory, approvals, report |
 | `sandbox/` | Acme Corp: mailbox, ERP, seeded data and PDFs, fault injection, eval-only admin API |
@@ -146,7 +160,8 @@ The full reasoning and trade-offs are in [`docs/DECISIONS.md`](docs/DECISIONS.md
 | Email asks to **change bank details** from a look-alike domain | Treats email content as information, not orders, flags the fraud signals, and the approval gate stops the change |
 | Clicks a ref from an old page | Gets a "stale ref" error plus a fresh snapshot |
 | Repeats the same failing action | The loop's stall detector tells it to change approach |
-| LLM out of credit / bad key | Fails fast with a clear message instead of retrying |
+| LLM out of credit, daily quota used up, bad key, unknown model | Fails fast with a clear message instead of retrying |
+| LLM per-minute rate limit (free tiers) | Paces requests client-side; if still limited, waits 20–60 s and retries |
 
 ---
 
@@ -175,9 +190,13 @@ harness also records whether the worker's verifier agreed with ground truth.
 
 ## Models, APIs, frameworks
 
-- **LLM:** Claude Opus 5.5 (`claude-opus-5-5`) via the Anthropic Python SDK, with adaptive thinking (summarized),
-  effort `high`, prompt caching on the static prefix, server-side refusal fallback, and server-side clearing of
-  stale tool results. OpenAI (`gpt-5.4` via Chat Completions) is supported as an alternative adapter.
+- **LLM (pluggable):**
+  - Claude Opus 5.5 (`claude-opus-5-5`) via the Anthropic Python SDK, with adaptive thinking (summarized),
+    effort `high`, prompt caching (static prefix plus automatic history caching), server-side refusal fallback,
+    and server-side clearing of stale tool results.
+  - Google Gemini (free tier, default `gemini-2.5-flash`), OpenAI (`gpt-5.4`), or any OpenAI-compatible server,
+    through one Chat Completions adapter (`openai` Python SDK with a different base URL), with client-side rate
+    pacing and quota-aware error handling.
 - **Browser automation:** Playwright (Chromium, or installed Chrome/Edge).
 - **Server/UI:** FastAPI, Uvicorn, server-sent events, a single vanilla-JS page (no build step).
 - **Sandbox:** FastAPI + Jinja2; invoices rendered with ReportLab; PDFs read with pypdf.

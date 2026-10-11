@@ -2,20 +2,29 @@ from __future__ import annotations
 
 import os
 
-from worker.config import Settings
-from worker.llm.base import (AssistantTurn, Conversation, LLMError, LLMProvider, ToolCall,
-                             ToolResult, ToolSpec, Usage)
+from worker.config import PROVIDERS, Settings
+from worker.llm.base import (AssistantTurn, Conversation, LLMError, LLMProvider, ToolCall, ToolResult,
+                             ToolSpec, Usage)
 
 
 def make_provider(settings: Settings) -> LLMProvider:
     name = settings.resolved_provider()
+    model = settings.resolved_model()
     if name == "anthropic":
         from worker.llm.anthropic_provider import AnthropicProvider
-        return AnthropicProvider(settings.anthropic_model, settings.anthropic_effort)
-    if name == "openai":
-        from worker.llm.openai_provider import OpenAIProvider
-        return OpenAIProvider(settings.openai_model, os.environ.get("OPENAI_REASONING_EFFORT", "low"))
-    raise ValueError(f"unknown provider {name!r}")
+        return AnthropicProvider(model, settings.anthropic_effort)
+
+    from worker.llm.openai_provider import OpenAIProvider
+    info = PROVIDERS[name]
+    base_url = settings.base_url or info.base_url
+    if name == "openai_compatible" and not base_url:
+        raise RuntimeError("WORKER_PROVIDER=openai_compatible needs LLM_BASE_URL "
+                           "(e.g. http://localhost:11434/v1 for Ollama).")
+    # Local servers like Ollama ignore the key but the SDK requires one.
+    api_key = os.environ.get(info.key_env) or ("not-needed" if name == "openai_compatible" else None)
+    effort = settings.reasoning_effort or ("low" if name == "openai" and model.startswith(("gpt-5", "o3", "o4")) else "")
+    return OpenAIProvider(model, name=name, api_key=api_key, base_url=base_url, reasoning_effort=effort,
+                          rpm=settings.resolved_rpm(), sanitize=name != "openai")
 
 
 __all__ = ["AssistantTurn", "Conversation", "LLMError", "LLMProvider", "ToolCall", "ToolResult",
