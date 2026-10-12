@@ -5,6 +5,7 @@ the plan, approve a risky action (with its screenshot), message the worker mid-r
 question, and read the verified result.
 """
 import asyncio
+import os
 import threading
 import time
 
@@ -14,7 +15,7 @@ import uvicorn
 
 from worker.llm.scripted import ScriptedProvider, Transcript, call, turn
 
-PORT = 8012
+PORT = int(os.environ.get("TEST_DASHBOARD_PORT", "8012"))
 STEER = "Use the Globex Corp vendor record."
 
 

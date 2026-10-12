@@ -410,7 +410,7 @@ def admin_health():
 
 @app.get("/__admin/state")
 def admin_state():
-    return {**store.state, "chaos": store.chaos_name, "faults_injected": store.faults_injected}
+    return {**store.state, "chaos": store.chaos_name, "seed": store.chaos.seed, "faults_injected": store.faults_injected}
 
 
 @app.post("/__admin/reset")

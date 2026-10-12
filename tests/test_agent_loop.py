@@ -5,6 +5,7 @@ approvals cannot be bypassed, "completed" must survive an independent audit,
 the loop notices when it is stuck, and the agent cannot leave its allowed systems.
 """
 from worker.human import ScriptedHumanChannel, ScriptedRule
+from worker.llm.base import LLMError
 from worker.llm.scripted import ScriptedProvider, Transcript, call, turn
 
 INTENT = "test"
@@ -103,6 +104,44 @@ def test_verified_completion(run_worker, reset_sandbox):
     result, _ = run_worker(ScriptedProvider(worker, verifier), ScriptedHumanChannel([]))
     assert result.outcome == "completed_verified"
     assert result.verification["achieved"] is True
+
+
+def test_verifier_retries_a_transient_llm_error(run_worker, reset_sandbox):
+    """Found in a live eval: a provider 503 ("high demand") in the verifier used to end the audit."""
+    reset_sandbox("off")
+    calls = []
+
+    def worker(t: Transcript):
+        return turn(call("finish", status="completed", summary="ok", claims=["x"]))
+
+    def verifier(t: Transcript):
+        calls.append(1)
+        if len(calls) == 1:
+            raise LLMError("503 This model is currently experiencing high demand")
+        return turn(call("report_verdict", achieved=True, confidence="high", issues=[],
+                         checks=[{"check": "x", "passed": True, "evidence": "seen"}]))
+
+    result, _ = run_worker(ScriptedProvider(worker, verifier), ScriptedHumanChannel([]))
+    assert result.outcome == "completed_verified"
+
+
+def test_inconclusive_audit_is_not_sent_back_as_findings(run_worker, reset_sandbox):
+    """If the verifier itself cannot run, that says nothing about the work: no 'NOT ACCEPTED' bounce."""
+    reset_sandbox("off")
+    finishes = []
+
+    def worker(t: Transcript):
+        finishes.append(1)
+        return turn(call("finish", status="completed", summary="ok", claims=["x"]))
+
+    def verifier(t: Transcript):
+        raise LLMError("no credit", fatal=True)
+
+    result, rec = run_worker(ScriptedProvider(worker, verifier), ScriptedHumanChannel([]),
+                             max_verification_rounds=2)
+    assert result.outcome == "completed_unverified"
+    assert result.verification["inconclusive"] is True
+    assert len(finishes) == 1
 
 
 def test_verifier_cannot_change_data(run_worker, reset_sandbox, sandbox_state, sandbox_url):

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import threading
 import time
@@ -11,7 +12,7 @@ import uvicorn
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-TEST_PORT = 8011
+TEST_PORT = int(os.environ.get("TEST_SANDBOX_PORT", "8011"))
 BASE = f"http://127.0.0.1:{TEST_PORT}"
 
 

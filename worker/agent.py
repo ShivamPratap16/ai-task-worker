@@ -10,7 +10,6 @@ left to the model's discretion:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import threading
 import time
@@ -23,7 +22,7 @@ from worker.human import HumanChannel
 from worker.llm import LLMError, LLMProvider, ToolResult, Usage, make_provider
 from worker.memory import LessonStore, Vault, WorkingMemory, load_company_context
 from worker.prompts import worker_system
-from worker.tools import RunCancelled, ToolContext, ToolExecutor, build_tools, until_cancelled
+from worker.tools import RunCancelled, ToolContext, ToolExecutor, build_tools, complete_with_retries
 from worker.verifier import Verdict, Verifier
 
 STALL_REPEATS = 3          # identical action this many times in a row -> intervene
@@ -79,6 +78,8 @@ class Worker:
         ctx = ToolContext(settings=s, browser=browser, recorder=recorder, human=human,
                           memory=WorkingMemory(), lessons=lessons, vault=vault, cancel=cancel)
         executor = ToolExecutor(ctx, build_tools())
+        if hasattr(self.provider, "bind_run"):  # record/replay cassettes need the run's identity (D20)
+            self.provider.bind_run(recorder, task, today)
         verifier = Verifier(self.provider, company, s.verifier_max_steps, today)
         convo = self.provider.conversation(worker_system(company, lessons.load(), vault.ids(), today),
                                            executor.specs())
@@ -122,18 +123,12 @@ class Worker:
         return result
 
     async def _complete(self, convo, usage: Usage, ctx: ToolContext):
-        """One LLM turn, with a couple of loop-level retries on top of the SDK's own. Cancellable throughout."""
-        for attempt in range(3):
-            try:
-                turn = await until_cancelled(convo.complete(), ctx.cancel)
-                usage.add(turn.usage)
-                return turn
-            except LLMError as exc:
-                if exc.fatal or attempt == 2:
-                    raise
-                await until_cancelled(asyncio.sleep(3 * (attempt + 1)), ctx.cancel)
-            finally:
-                self._report_notices(ctx)
+        try:
+            turn = await complete_with_retries(convo, ctx.cancel)
+            usage.add(turn.usage)
+            return turn
+        finally:
+            self._report_notices(ctx)
 
     def _report_notices(self, ctx: ToolContext) -> None:
         for notice in self.provider.drain_notices():
@@ -194,8 +189,10 @@ class Worker:
                 if verdict is not None:
                     verification_rounds += 1
                     rec.emit("verification", round=verification_rounds, **verdict.to_dict())
-                if verdict is None or verdict.achieved or verification_rounds >= s.max_verification_rounds \
-                        or finish_args.get("status") != "completed":
+                # An inconclusive audit (the verifier's LLM failed, or it ran out of steps) says nothing about
+                # the work, so it is not sent back as findings: the run ends as completed_unverified.
+                if verdict is None or verdict.achieved or verdict.inconclusive \
+                        or verification_rounds >= s.max_verification_rounds or finish_args.get("status") != "completed":
                     self._finalize(result, finish_args, verdict)
                     return
                 results.append(ToolResult(finish_call_id, (

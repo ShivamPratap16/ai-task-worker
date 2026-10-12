@@ -44,6 +44,8 @@ PROVIDERS: dict[str, ProviderInfo] = {
     "openai": ProviderInfo("OPENAI_API_KEY", "gpt-5.4"),
     # Any OpenAI-compatible server: Ollama (http://localhost:11434/v1), OpenRouter, Groq, vLLM, ...
     "openai_compatible": ProviderInfo("LLM_API_KEY", "", base_url=None),
+    # Plays back a recorded run (LLM_CASSETTE=path); no key, no network. See worker/llm/recording.py.
+    "replay": ProviderInfo("LLM_CASSETTE", ""),
 }
 # Auto-detection order when WORKER_PROVIDER is not set: best model first, then free.
 AUTO_DETECT_ORDER = ("anthropic", "gemini", "openai")
@@ -64,6 +66,8 @@ class Settings:
     base_url: str = ""                     # overrides the provider's endpoint (needed for openai_compatible)
     rpm: int = -1                          # requests/minute cap; -1 = provider default, 0 = unlimited
     fallback_models: tuple[str, ...] | None = None  # None = the provider's defaults; () = never switch
+    record: str = ""                       # LLM_RECORD: cassette file, directory, or "1" (= cassettes/)
+    cassette: str = ""                     # LLM_CASSETTE: the cassette WORKER_PROVIDER=replay plays back
     # Agent loop budgets
     max_steps: int = 60
     max_verification_rounds: int = 2
@@ -101,6 +105,8 @@ class Settings:
                              tuple(m.strip() for m in os.environ["LLM_FALLBACK_MODELS"].split(",") if m.strip())),
             use_lessons=_bool("WORKER_USE_LESSONS", True),
             start_url=os.environ.get("WORKER_START_URL", cls.start_url),
+            record=os.environ.get("LLM_RECORD", ""),
+            cassette=os.environ.get("LLM_CASSETTE", ""),
         )
         if os.environ.get("WORKER_TODAY"):  # pin "today" for reproducible evals
             s.extra["today"] = os.environ["WORKER_TODAY"]
@@ -121,6 +127,10 @@ class Settings:
 
     def resolved_model(self) -> str:
         name = self.resolved_provider()
+        if name == "replay":
+            if not self.cassette:
+                raise RuntimeError("WORKER_PROVIDER=replay needs LLM_CASSETTE=path/to/cassette.json")
+            return Path(self.cassette).name
         model = self.model or PROVIDERS[name].default_model
         if not model:
             raise RuntimeError(f"Set LLM_MODEL for provider {name!r}.")

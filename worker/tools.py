@@ -63,6 +63,19 @@ async def until_cancelled(awaitable, cancel: threading.Event):
             raise RunCancelled()
 
 
+async def complete_with_retries(convo, cancel: threading.Event, attempts: int = 3):
+    """One LLM turn, with a few loop-level retries on top of the SDK's own (e.g. a provider's 503 "high demand").
+    Fatal errors (no credit, bad key) are raised at once. Cancellable throughout."""
+    from worker.llm.base import LLMError
+    for attempt in range(attempts):
+        try:
+            return await until_cancelled(convo.complete(), cancel)
+        except LLMError as exc:
+            if exc.fatal or attempt == attempts - 1:
+                raise
+            await until_cancelled(asyncio.sleep(3 * (attempt + 1)), cancel)
+
+
 async def _evidence(ctx: "ToolContext", label: str) -> str | None:
     """Screenshot for the human, best effort: evidence capture must never break the run."""
     try:
@@ -156,6 +169,8 @@ async def _guard_interaction(ctx: ToolContext, ref, *, submits: bool, verb: str)
     if info["tag"] == "a" and info["href"]:
         await _guard_url(ctx, info["href"])
     is_submit = submits and (info["tag"] == "button" or info["type"] in ("submit", "image"))
+    if info.get("form_method") and not info.get("form_action"):
+        info["form_action"] = ctx.browser.page.url  # a form without action= posts to the current page
     decision = policy.assess_interaction(info, submits=is_submit or (verb == "enter"),
                                          mode=ctx.settings.approval_mode, read_only=ctx.read_only)
     if not decision.allowed:
@@ -164,7 +179,8 @@ async def _guard_interaction(ctx: ToolContext, ref, *, submits: bool, verb: str)
     if decision.needs_approval:
         await ctx.request_approval(f"{'press' if verb != 'enter' else 'submit form via'} '{label}' on {ctx.browser.page.url}",
                                    decision.reason)
-    changes_data = info.get("form_method", "post") != "get" and not policy.SAFE_LABEL.match(label or "")
+    changes_data = policy.risky_endpoint(info) or (
+        info.get("form_method", "post") != "get" and not policy.SAFE_LABEL.match(label or ""))
     if (is_submit or verb == "enter") and changes_data:
         ctx.mutations.append({"action": label, "page": ctx.browser.page.url, "at": time.time()})
     return info
