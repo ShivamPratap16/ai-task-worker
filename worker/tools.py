@@ -459,7 +459,8 @@ class ToolExecutor:
                                   True, "bad_arguments")
         elif (problem := _validate(tool.spec, call.arguments)) is not None:
             outcome = ToolOutcome(f"Invalid arguments for {call.name}: {problem}", True, "bad_arguments")
-        elif ctx.settings.plan_review and not ctx.read_only and not ctx.plan_approved                 and call.name not in PLAN_REVIEW_ALLOWED:
+        elif ctx.settings.plan_review and not ctx.read_only and not ctx.plan_approved \
+                and call.name not in PLAN_REVIEW_ALLOWED:
             outcome = ToolOutcome("Plan review is on: first record your complete plan with update_plan. The operator "
                                   "must approve it before you take any action.", True, "plan_not_approved")
         else:
