@@ -154,7 +154,8 @@ def main() -> int:
     total = f"${sum(costs):.2f}" + (f" ({n - len(costs)} runs unpriced)" if len(costs) < n else "") if costs else "n/a"
     lines += ["", f"Mean steps: {sum(r['steps'] for r in rows) / n:.1f}  |  mean duration: "
               f"{sum(r['duration_s'] for r in rows) / n:.0f}s  |  total cost: {total}  |  faults injected: "
-              f"{sum(len(r['faults_injected']) for r in rows)}  |  auto-retries: {sum(r['auto_retries'] for r in rows)}",
+              f"{sum(len(r['faults_injected']) for r in rows)}  |  "
+              f"auto-retries: {sum(r['auto_retries'] for r in rows)}",
               "", "Costs are approximate (list prices in evals/pricing.py; cache writes not counted)."]
     (out_dir / f"{stamp}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n" + "\n".join(lines))

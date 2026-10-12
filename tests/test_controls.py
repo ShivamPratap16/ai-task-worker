@@ -173,7 +173,8 @@ def test_daily_quota_switches_to_fallback_model(tmp_path):
     assert calls == ["big-model", "small-model"] and provider.model == "small-model"
     notice = provider.drain_notices()[0]
     assert notice["to"] == "small-model" and "20 requests/day" in notice["reason"] and "5h" in notice["reason"]
-    assert messages[0]["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == "skip_thought_signature_validator"
+    signature = messages[0]["tool_calls"][0]["extra_content"]["google"]["thought_signature"]
+    assert signature == "skip_thought_signature_validator"
     assert ledger.exhausted("big-model") and ledger.status("small-model")["requests"] == 1
     # A new run skips the exhausted model from the start.
     again = OpenAIProvider("big-model", name="gemini", api_key="x", base_url="http://unused/",

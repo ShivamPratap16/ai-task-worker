@@ -30,7 +30,7 @@ CONTEXT_EDITING_BETA = "context-management-2025-06-27"
 
 
 class AnthropicConversation(Conversation):
-    def __init__(self, provider: "AnthropicProvider", system: str, tools: list[ToolSpec]):
+    def __init__(self, provider: AnthropicProvider, system: str, tools: list[ToolSpec]):
         self.p = provider
         # Stable prefix (tools + system) is cached; only the growing history varies.
         self.system = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]

@@ -34,7 +34,7 @@ class RunHandle:
     thread: threading.Thread | None = None
 
     @classmethod
-    def from_disk(cls, run_dir: Path) -> "RunHandle | None":
+    def from_disk(cls, run_dir: Path) -> RunHandle | None:
         recorder = StoredRecorder.load(run_dir)
         if not recorder.events or recorder.events[0].type != "run_started":
             return None

@@ -40,7 +40,8 @@ def _live_provider(settings: Settings, name: str) -> LLMProvider:
                            "(e.g. http://localhost:11434/v1 for Ollama).")
     # Local servers like Ollama ignore the key but the SDK requires one.
     api_key = os.environ.get(info.key_env) or ("not-needed" if name == "openai_compatible" else None)
-    effort = settings.reasoning_effort or ("low" if name == "openai" and model.startswith(("gpt-5", "o3", "o4")) else "")
+    reasoning_model = name == "openai" and model.startswith(("gpt-5", "o3", "o4"))
+    effort = settings.reasoning_effort or ("low" if reasoning_model else "")
     from worker.quota import QuotaLedger
     return OpenAIProvider(model, name=name, api_key=api_key, base_url=base_url, reasoning_effort=effort,
                           rpm=settings.resolved_rpm(), sanitize=name != "openai",

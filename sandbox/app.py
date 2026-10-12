@@ -42,7 +42,7 @@ class Chaos:
     seed: int = 7
 
     @classmethod
-    def profile(cls, name: str, seed_value: int = 7) -> "Chaos":
+    def profile(cls, name: str, seed_value: int = 7) -> Chaos:
         profiles = {
             "off": cls(seed=seed_value),
             "realistic": cls(flaky_post_rate=0.35, session_max_requests=18,
@@ -410,7 +410,8 @@ def admin_health():
 
 @app.get("/__admin/state")
 def admin_state():
-    return {**store.state, "chaos": store.chaos_name, "seed": store.chaos.seed, "faults_injected": store.faults_injected}
+    return {**store.state, "chaos": store.chaos_name, "seed": store.chaos.seed,
+            "faults_injected": store.faults_injected}
 
 
 @app.post("/__admin/reset")

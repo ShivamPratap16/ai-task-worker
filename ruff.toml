@@ -1,0 +1,11 @@
+# Lint config shared by local runs and CI:  python -m ruff check .
+line-length = 120
+target-version = "py311"
+extend-exclude = ["frontend", "ui", "runs", "cassettes"]
+
+[lint]
+select = ["E", "F", "B", "UP", "SIM"]
+
+[lint.per-file-ignores]
+# Seeded emails are fixture data: rewrapping them would change the sandbox's start state (and break cassettes).
+"sandbox/seed.py" = ["E501"]

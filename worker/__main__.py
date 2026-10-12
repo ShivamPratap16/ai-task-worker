@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
 import time
 import uuid
@@ -133,7 +132,8 @@ def cmd_check(args) -> int:
     finally:
         loop.close()
     if turn.tool_calls and turn.tool_calls[0].name == "ping":
-        print(f"OK: tool calling works ({turn.model}; {turn.usage.input_tokens} in / {turn.usage.output_tokens} out tokens)")
+        u = turn.usage
+        print(f"OK: tool calling works ({turn.model}; {u.input_tokens} in / {u.output_tokens} out tokens)")
         return 0
     print(f"WARNING: the model answered without calling the tool: {turn.text[:200]!r}. "
           "It may be too weak for this agent; try another model.")

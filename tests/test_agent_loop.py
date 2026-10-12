@@ -269,8 +269,9 @@ def test_verified_completion_closes_open_plan_steps(run_worker, reset_sandbox):
 
     def worker(t: Transcript):
         if t.turns() == 0:
-            return turn(call("update_plan", steps=[{"step": "a", "status": "done"}, {"step": "b", "status": "in_progress"},
-                                                   {"step": "c", "status": "pending"}, {"step": "d", "status": "skipped"}]))
+            return turn(call("update_plan", steps=[
+                {"step": "a", "status": "done"}, {"step": "b", "status": "in_progress"},
+                {"step": "c", "status": "pending"}, {"step": "d", "status": "skipped"}]))
         return turn(call("finish", status="completed", summary="ok", claims=["x"]))
 
     def verifier(t: Transcript):

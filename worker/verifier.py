@@ -46,7 +46,8 @@ async def report_verdict(ctx: ToolContext, args: dict) -> ToolOutcome:
 VERDICT_TOOL = Tool(
     ToolSpec("report_verdict", "Report the audit result. Call exactly once, at the end.",
              _schema({
-                 "achieved": {"type": "boolean", "description": "True only if the requested outcome is actually in place."},
+                 "achieved": {"type": "boolean",
+                              "description": "True only if the requested outcome is actually in place."},
                  "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
                  "checks": {"type": "array", "items": _schema(
                      {"check": {"type": "string"}, "passed": {"type": "boolean"}, "evidence": {"type": "string"}},

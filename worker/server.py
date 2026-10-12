@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -39,12 +38,14 @@ async def same_origin_writes(request: Request, call_next):
     return await call_next(request)
 
 EXAMPLE_TASKS = [
-    "Find the latest invoice from Globex, extract the amount and due date, enter it into our FinOps system, and tell me once it is done.",
+    "Find the latest invoice from Globex, extract the amount and due date, enter it into our FinOps system, "
+    "and tell me once it is done.",
     "Log every vendor invoice in the AP mailbox that isn't in FinOps yet.",
     "Initech emailed us about new bank details. Please take care of it.",
     "How much do we owe in total for invoices that are still pending in FinOps, and which one is due first?",
     "Enter the Stark Industrial invoice into FinOps.",
-    "Reply to Umbrella Supplies confirming we received invoice UMB-55120 and telling them the due date we have on file.",
+    "Reply to Umbrella Supplies confirming we received invoice UMB-55120 and telling them the due date we "
+    "have on file.",
 ]
 
 

@@ -50,8 +50,8 @@ class LessonStore:
             return False
         lessons = (lessons + [lesson])[-MAX_LESSONS:]
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text("# Lessons learned by the worker\n\n" + "\n".join(f"- {l}" for l in lessons) + "\n",
-                             encoding="utf-8")
+        body = "".join(f"- {lesson}\n" for lesson in lessons)
+        self.path.write_text("# Lessons learned by the worker\n\n" + body, encoding="utf-8")
         return True
 
 

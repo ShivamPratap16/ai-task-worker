@@ -154,7 +154,7 @@ class RecordingProvider(LLMProvider):
 # ------------------------------------------------------------------ replay
 
 class ReplayConversation(Conversation):
-    def __init__(self, provider: "ReplayProvider", index: int, role: str):
+    def __init__(self, provider: ReplayProvider, index: int, role: str):
         self.provider, self.index = provider, index
         self.seen = _Seen()
         convos = provider.cassette["conversations"]
@@ -195,7 +195,7 @@ class ReplayProvider(LLMProvider):
         self.divergences: list[str] = []  # turns where the model's input differed from the recording
 
     @classmethod
-    def load(cls, path: str | Path) -> "ReplayProvider":
+    def load(cls, path: str | Path) -> ReplayProvider:
         return cls(json.loads(Path(path).read_text(encoding="utf-8")))
 
     def bind_run(self, recorder, task: str, today: str | None) -> None:

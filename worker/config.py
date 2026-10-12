@@ -89,7 +89,7 @@ class Settings:
     extra: dict = field(default_factory=dict)
 
     @classmethod
-    def from_env(cls, **overrides) -> "Settings":
+    def from_env(cls, **overrides) -> Settings:
         s = cls(
             provider=os.environ.get("WORKER_PROVIDER", "").strip().lower(),
             model=os.environ.get("LLM_MODEL", ""),
@@ -120,7 +120,8 @@ class Settings:
                 raise RuntimeError(f"Unknown WORKER_PROVIDER {self.provider!r}; choose from {sorted(PROVIDERS)}")
             return self.provider
         for name in AUTO_DETECT_ORDER:
-            if os.environ.get(PROVIDERS[name].key_env) or (name == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+            has_token = name == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")
+            if os.environ.get(PROVIDERS[name].key_env) or has_token:
                 return name
         raise RuntimeError("No LLM configured. Put one key in .env: ANTHROPIC_API_KEY, GEMINI_API_KEY (free tier), "
                            "or OPENAI_API_KEY - or set WORKER_PROVIDER=openai_compatible with LLM_BASE_URL/LLM_MODEL.")
@@ -137,7 +138,9 @@ class Settings:
         return model
 
     def resolved_fallbacks(self) -> list[str]:
-        models = PROVIDERS[self.resolved_provider()].fallback_models if self.fallback_models is None             else self.fallback_models
+        models = self.fallback_models
+        if models is None:
+            models = PROVIDERS[self.resolved_provider()].fallback_models
         primary = self.resolved_model()
         return [m for m in dict.fromkeys(models) if m != primary]
 

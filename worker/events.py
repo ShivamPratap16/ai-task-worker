@@ -18,7 +18,8 @@ from typing import Any
 class Event:
     seq: int
     ts: float
-    type: str          # run_started | thought | plan | action | observation | approval | question | answer | memory | verification | usage | error | note | run_finished
+    type: str          # run_started | thought | plan | action | observation | approval_* | question | answer |
+                       # memory | verification | usage | llm_retry | error | run_finished (see worker/inspect_run.py)
     data: dict[str, Any]
 
     def to_dict(self) -> dict:
@@ -78,7 +79,7 @@ class StoredRecorder:
     events: list[Event]
 
     @classmethod
-    def load(cls, run_dir: Path) -> "StoredRecorder":
+    def load(cls, run_dir: Path) -> StoredRecorder:
         events: list[Event] = []
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines():
             if line.strip():
@@ -87,7 +88,8 @@ class StoredRecorder:
         if events and events[-1].type != "run_finished":
             # The server stopped mid-run; close the record honestly so viewers are not left waiting.
             events.append(Event(seq=len(events), ts=events[-1].ts, type="run_finished", data={
-                "outcome": "error", "summary": "Interrupted: the dashboard server stopped while this run was in progress."}))
+                "outcome": "error",
+                "summary": "Interrupted: the dashboard server stopped while this run was in progress."}))
         return cls(run_dir.name, run_dir, events)
 
     def since(self, seq: int) -> list[Event]:

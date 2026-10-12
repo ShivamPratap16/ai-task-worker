@@ -20,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from pypdf import PdfReader
 
@@ -91,7 +91,7 @@ def llm_retry_reporter(recorder, actor: str):
     return report
 
 
-async def _evidence(ctx: "ToolContext", label: str) -> str | None:
+async def _evidence(ctx: ToolContext, label: str) -> str | None:
     """Screenshot for the human, best effort: evidence capture must never break the run."""
     try:
         return (await ctx.browser.screenshot(label)).name if ctx.browser.page is not None else None
@@ -148,7 +148,8 @@ class Tool:
     available_read_only: bool = True
 
 
-INTENT = {"type": "string", "description": "One short sentence: why you are taking this action (shown to the human operator)."}
+INTENT = {"type": "string",
+          "description": "One short sentence: why you are taking this action (shown to the human operator)."}
 
 
 def _schema(props: dict, required: list[str]) -> dict:
@@ -192,7 +193,8 @@ async def _guard_interaction(ctx: ToolContext, ref, *, submits: bool, verb: str)
         raise PolicyBlocked(decision.reason)
     label = info.get("form_submit_label") if verb == "enter" else info.get("text")
     if decision.needs_approval:
-        await ctx.request_approval(f"{'press' if verb != 'enter' else 'submit form via'} '{label}' on {ctx.browser.page.url}",
+        how = "press" if verb != "enter" else "submit form via"
+        await ctx.request_approval(f"{how} '{label}' on {ctx.browser.page.url}",
                                    decision.reason)
     changes_data = policy.risky_endpoint(info) or (
         info.get("form_method", "post") != "get" and not policy.SAFE_LABEL.match(label or ""))
@@ -302,7 +304,8 @@ async def update_plan(ctx: ToolContext, args: dict) -> ToolOutcome:
     if resp.approved:
         ctx.plan_approved = True
         note = resp.answer if resp.answer not in ("", "approved") else ""
-        return ToolOutcome("Plan recorded. The operator APPROVED it; go ahead." + (f" Operator note: {note}" if note else ""))
+        return ToolOutcome("Plan recorded. The operator APPROVED it; go ahead."
+                           + (f" Operator note: {note}" if note else ""))
     return ToolOutcome(f"The operator did NOT approve this plan and asked for changes: {resp.answer}\n"
                        "Revise the plan accordingly and call update_plan again.")
 
@@ -324,7 +327,8 @@ async def ask_human(ctx: ToolContext, args: dict) -> ToolOutcome:
     kind = args.get("kind", "clarification")
     req = HumanRequest(kind=kind, question=args["question"], options=args.get("options") or [],
                        context={"page": ctx.browser.page.url})
-    ctx.recorder.emit("question", actor=ctx.actor, request_id=req.id, kind=kind, question=req.question, options=req.options,
+    ctx.recorder.emit("question", actor=ctx.actor, request_id=req.id, kind=kind, question=req.question,
+                      options=req.options,
                       screenshot=await _evidence(ctx, f"{ctx.actor}-question"))
     resp = await ctx.human.ask(req, ctx.settings.human_timeout_s)
     ctx.recorder.emit("answer", actor=ctx.actor, request_id=req.id, answer=resp.answer, approved=resp.approved,
@@ -380,7 +384,8 @@ def build_tools() -> dict[str, Tool]:
                       "the plan changes or a step completes.",
                       _schema({"steps": {"type": "array", "items": _schema(
                           {"step": {"type": "string"},
-                           "status": {"type": "string", "enum": ["pending", "in_progress", "done", "skipped", "failed"]}},
+                           "status": {"type": "string",
+                                      "enum": ["pending", "in_progress", "done", "skipped", "failed"]}},
                           ["step", "status"])}}, ["steps"])),
              update_plan, available_read_only=False),
         Tool(ToolSpec("remember", "Store a fact you discovered (e.g. an amount, a date, a record id) in working "
@@ -406,9 +411,11 @@ def build_tools() -> dict[str, Tool]:
                                "summary": {"type": "string", "description": "Concise report for the requester."},
                                "claims": {"type": "array", "items": {"type": "string"},
                                           "description": "Specific, checkable statements about the end state, "
-                                                         "e.g. 'FinOps invoice GLX-2026-0934 exists with amount 16245.50 USD'."},
+                                                         "e.g. 'FinOps invoice GLX-2026-0934 exists with amount "
+                                                         "16245.50 USD'."},
                                "evidence": {"type": "array", "items": {"type": "string"},
-                                            "description": "Where each claim can be observed (URLs, record ids, file names)."}},
+                                            "description": "Where each claim can be observed (URLs, record ids, "
+                                                           "file names)."}},
                               ["status", "summary", "claims"])),
              finish, available_read_only=False),
     ]
@@ -496,7 +503,8 @@ class ToolExecutor:
                     continue
                 return await self._error_with_page(f"{exc}", exc.kind)
             except Exception as exc:  # an unexpected tool failure is an observation, not a crash
-                return await self._error_with_page(f"Tool error ({type(exc).__name__}): {str(exc).splitlines()[0][:300]}",
+                first_line = str(exc).splitlines()[0][:300] if str(exc) else ""
+                return await self._error_with_page(f"Tool error ({type(exc).__name__}): {first_line}",
                                                    "tool_exception")
         return ToolOutcome("unreachable", True)
 

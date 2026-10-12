@@ -24,6 +24,7 @@ from pathlib import Path
 from playwright.async_api import Browser, BrowserContext, Download, Page, async_playwright
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
+import contextlib
 
 SNAPSHOT_CHAR_LIMIT = 14000
 
@@ -103,7 +104,7 @@ SNAPSHOT_JS = r"""
   walk(document.body); flush();
   return { title: document.title, url: location.href, text: out.join('\n'), refs: ref };
 }
-"""
+"""  # noqa: E501  (JavaScript run in the page)
 
 
 class BrowserActionError(Exception):
@@ -174,7 +175,7 @@ class BrowserSession:
         raise RuntimeError("Could not launch a browser. Run `python -m playwright install chromium` or install "
                            "Chrome/Edge.\n" + "\n".join(errors))
 
-    async def fork(self, downloads_dir: Path, screenshots_dir: Path) -> "BrowserSession":
+    async def fork(self, downloads_dir: Path, screenshots_dir: Path) -> BrowserSession:
         """A fresh, isolated session (new cookies) on the same browser - used by the verifier."""
         other = BrowserSession(downloads_dir=downloads_dir, screenshots_dir=screenshots_dir, headless=self.headless)
         await other.start(browser=self._browser)
@@ -220,10 +221,8 @@ class BrowserSession:
         return path
 
     async def _settle(self) -> None:
-        try:
+        with contextlib.suppress(PlaywrightTimeout):
             await self.page.wait_for_load_state("domcontentloaded", timeout=8000)
-        except PlaywrightTimeout:
-            pass
 
     # ------------------------------------------------------------ actions
     async def _locate(self, ref: int | str):
@@ -257,7 +256,8 @@ class BrowserSession:
         except PlaywrightError as exc:
             msg = str(exc).splitlines()[0]
             if "ERR_CONNECTION_REFUSED" in msg or "ERR_CONNECTION_RESET" in msg:
-                raise BrowserActionError(f"Could not connect to {url} ({msg}).", kind="network", retryable=True) from exc
+                raise BrowserActionError(f"Could not connect to {url} ({msg}).", kind="network",
+                                         retryable=True) from exc
             if "Download is starting" in msg:
                 await asyncio.sleep(0.8)  # navigating straight to a file: the download handler saves it
                 return
@@ -296,7 +296,8 @@ class BrowserSession:
 
     async def select(self, ref: int | str, option: str) -> str:
         el = await self._locate(ref)
-        options = await el.evaluate("(el) => el.options ? [...el.options].map(o => ({v: o.value, t: o.text.trim()})) : null")
+        options = await el.evaluate(
+            "(el) => el.options ? [...el.options].map(o => ({v: o.value, t: o.text.trim()})) : null")
         if options is None:
             raise BrowserActionError(f"[{ref}] is not a dropdown.")
         wanted = option.strip().lower()
@@ -314,10 +315,8 @@ class BrowserSession:
     async def _after_action(self) -> None:
         # Give navigations / downloads triggered by the action a moment to start and settle.
         await asyncio.sleep(0.3)
-        try:
+        with contextlib.suppress(PlaywrightTimeout):
             await self.page.wait_for_load_state("domcontentloaded", timeout=8000)
-        except PlaywrightTimeout:
-            pass
 
     def take_new_downloads(self) -> list[Path]:
         files, self.new_downloads = self.new_downloads, []

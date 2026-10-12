@@ -9,7 +9,7 @@ from __future__ import annotations
 import itertools
 import re
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 
 from worker.llm.base import AssistantTurn, Conversation, LLMProvider, ToolCall, ToolResult, ToolSpec
 
@@ -19,7 +19,8 @@ _ids = itertools.count(1)
 @dataclass
 class Transcript:
     system: str
-    entries: list[tuple[str, object]] = field(default_factory=list)  # ("user", text) | ("results", [...]) | ("note", text) | ("assistant", turn)
+    # ("user", text) | ("results", [...]) | ("note", text) | ("assistant", turn)
+    entries: list[tuple[str, object]] = field(default_factory=list)
 
     @property
     def last_observation(self) -> str:

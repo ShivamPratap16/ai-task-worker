@@ -123,7 +123,7 @@ def worker_system(company_context: str, lessons: list[str], credential_ids: list
                   today: str | None = None) -> str:
     return WORKER_SYSTEM.format(
         company_context=company_context.strip(),
-        lessons="\n".join(f"- {l}" for l in lessons) if lessons else "(none yet)",
+        lessons="\n".join(f"- {lesson}" for lesson in lessons) if lessons else "(none yet)",
         credential_ids=", ".join(credential_ids) or "(none)",
         today=today or date.today().isoformat(),
     )

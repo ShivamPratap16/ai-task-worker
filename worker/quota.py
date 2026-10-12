@@ -15,6 +15,7 @@ import threading
 import time
 from datetime import date
 from pathlib import Path
+import contextlib
 
 
 def parse_quota_error(text: str) -> dict:
@@ -38,20 +39,18 @@ def human_duration(seconds: float) -> str:
 
 
 class QuotaLedger:
-    _shared: dict[Path, "QuotaLedger"] = {}
+    _shared: dict[Path, QuotaLedger] = {}
     _registry_lock = threading.Lock()
 
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.Lock()
         self.data: dict = {"day": date.today().isoformat(), "models": {}}
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self.data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pass
 
     @classmethod
-    def shared(cls, path: Path) -> "QuotaLedger":
+    def shared(cls, path: Path) -> QuotaLedger:
         path = path.resolve()
         with cls._registry_lock:
             if path not in cls._shared:

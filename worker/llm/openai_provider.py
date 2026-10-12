@@ -41,7 +41,7 @@ class RateLimiter:
     """Sliding-window requests-per-minute cap, shared by every run in the process
     (runs execute on different threads and event loops, hence a threading lock)."""
 
-    _shared: dict[str, "RateLimiter"] = {}
+    _shared: dict[str, RateLimiter] = {}
     _registry_lock = threading.Lock()
 
     def __init__(self, rpm: int):
@@ -50,7 +50,7 @@ class RateLimiter:
         self.lock = threading.Lock()
 
     @classmethod
-    def for_key(cls, key: str, rpm: int) -> "RateLimiter":
+    def for_key(cls, key: str, rpm: int) -> RateLimiter:
         with cls._registry_lock:
             if key not in cls._shared:
                 cls._shared[key] = cls(rpm)
@@ -83,7 +83,7 @@ def sanitize_schema(schema):
 
 
 class OpenAIConversation(Conversation):
-    def __init__(self, provider: "OpenAIProvider", system: str, tools: list[ToolSpec]):
+    def __init__(self, provider: OpenAIProvider, system: str, tools: list[ToolSpec]):
         self.p = provider
         self.messages: list[dict] = [{"role": "system", "content": system}]
         self.tools = [{"type": "function",
@@ -230,7 +230,8 @@ class OpenAIProvider(LLMProvider):
             except openai.NotFoundError as exc:
                 if self._switch_model(messages, f"model {self.model!r} is not available for this key"):
                     continue
-                raise LLMError(f"{self.name}: model {self.model!r} not found for this key/endpoint", fatal=True) from exc
+                raise LLMError(f"{self.name}: model {self.model!r} not found for this key/endpoint",
+                               fatal=True) from exc
             except openai.BadRequestError as exc:
                 raise LLMError(f"{self.name} rejected the request: {str(exc)[:500]}", fatal=True) from exc
             except openai.APIError as exc:

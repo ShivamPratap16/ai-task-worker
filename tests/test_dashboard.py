@@ -46,7 +46,8 @@ def dashboard(settings, sandbox_url, reset_sandbox, monkeypatch):
         if s == 5:
             return turn(call("browser_click", ref=t.ref("button", "Submit for payment"), intent="Submit invoice 2"))
         if s == 6:
-            return turn(call("ask_human", kind="clarification", question="Email the vendor too?", options=["Yes", "No"]))
+            return turn(call("ask_human", kind="clarification", question="Email the vendor too?",
+                             options=["Yes", "No"]))
         heard.extend(t.notes())
         return turn(call("finish", status="completed", summary="Invoice 2 submitted for payment.",
                          claims=["Invoice 2 is Submitted for payment"], evidence=[f"{sandbox_url}/erp/invoices/2"]))

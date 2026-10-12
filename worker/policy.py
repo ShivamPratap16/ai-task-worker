@@ -18,7 +18,8 @@ RISKY_LABEL = re.compile(
     r"\b(submit for payment|pay|payment|approve|delete|remove|transfer|wire|"
     r"update bank|bank details|send|send email|publish|cancel order)\b", re.I)
 # Actions that only read, navigate or authenticate - allowed even in read-only mode.
-SAFE_LABEL = re.compile(r"^\s*(search|filter|go|find|sign in|log in|login|dismiss|close|ok|next|previous|back)\s*$", re.I)
+SAFE_LABEL = re.compile(
+    r"^\s*(search|filter|go|find|sign in|log in|login|dismiss|close|ok|next|previous|back)\s*$", re.I)
 # Form endpoints (URL path segments) whose POST has real-world consequences.
 RISKY_ENDPOINT = re.compile(r"/(submit|pay|payments?|transfer|bank|delete|remove|approve|reply|send)(/|$)", re.I)
 BLOCKED_PATH = re.compile(r"^/__admin", re.I)

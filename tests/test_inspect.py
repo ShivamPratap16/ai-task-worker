@@ -12,11 +12,13 @@ def ev(seq, type_, **data):
 
 TRACE = [
     ev(0, "run_started", task="Enter the invoice", provider="scripted", model="m"),
-    ev(1, "action", actor="worker", call_id="a", tool="browser_click", args={"ref": 3, "intent": "Save"}, intent="Save"),
+    ev(1, "action", actor="worker", call_id="a", tool="browser_click", args={"ref": 3, "intent": "Save"},
+       intent="Save"),
     ev(2, "observation", actor="worker", call_id="a", ok=True, error_kind="", url="http://x/erp",
        content="Clicked.\nWARNING: the server answered HTTP 503; the action likely did not take effect.\nPAGE"),
     ev(3, "action", actor="worker", call_id="b", tool="browser_click", args={"ref": 9}, intent="Pay"),
-    ev(4, "observation", actor="worker", call_id="b", ok=False, error_kind="policy_blocked", content="BLOCKED by policy"),
+    ev(4, "observation", actor="worker", call_id="b", ok=False, error_kind="policy_blocked",
+       content="BLOCKED by policy"),
     ev(5, "action", actor="worker", call_id="c", tool="remember", args={"key": "id", "value": "4"}, intent=""),
     ev(6, "observation", actor="worker", call_id="c", ok=True, error_kind="", content="Saved."),
     ev(7, "verification", round=1, achieved=False, confidence="high", inconclusive=False,
@@ -35,9 +37,9 @@ def run_dir(tmp_path):
 
 def test_timeline_numbers_actions_and_flags_server_errors(run_dir):
     lines = timeline(load_events(run_dir))
-    assert any("#1" in l and "ok, but WARNING: the server answered HTTP 503" in l for l in lines)
-    assert any("#2" in l and "ERR[policy_blocked]" in l for l in lines)
-    assert any("FAIL: invoice exists" in l for l in lines)
+    assert any("#1" in line and "ok, but WARNING: the server answered HTTP 503" in line for line in lines)
+    assert any("#2" in line and "ERR[policy_blocked]" in line for line in lines)
+    assert any("FAIL: invoice exists" in line for line in lines)
     assert lines[-1].endswith("=== failed after 3 steps, 8.0s ===")
 
 
