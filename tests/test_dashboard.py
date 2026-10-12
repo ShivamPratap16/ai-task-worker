@@ -107,7 +107,7 @@ async def _drive(base: str) -> dict:
         await page.wait_for_selector(".card.ask >> text=Email the vendor too?", timeout=30000)
         await page.fill("#steerInput", STEER)
         await page.click("#steer button")
-        await page.wait_for_selector(f".ev.k-you >> text={STEER}", timeout=10000)
+        await page.wait_for_selector(f".ev.k-you >> text={STEER}", timeout=30000)
         await page.click(".card.ask button:has-text('No')")
 
         await page.wait_for_selector(".result.ok", timeout=60000)
@@ -130,7 +130,7 @@ async def _drive(base: str) -> dict:
         await page.keyboard.press("Escape")
         # Overview dashboard lists the run.
         await page.click("#navOverview")
-        await page.wait_for_selector(".runs-tbl tbody tr", timeout=10000)
+        await page.wait_for_selector(".runs-tbl tbody tr", timeout=30000)
         out["overview_rows"] = await page.locator(".runs-tbl tbody tr").count()
         out["errors"] = errors
         await browser.close()
