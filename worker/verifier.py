@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from worker.browser import BrowserSession
 from worker.llm.base import LLMError, LLMProvider, ToolResult, ToolSpec, Usage
 from worker.prompts import VERIFIER_TASK, verifier_system
-from worker.tools import Tool, ToolContext, ToolExecutor, ToolOutcome, _schema, build_tools, complete_with_retries
+from worker.tools import (Tool, ToolContext, ToolExecutor, ToolOutcome, _schema, build_tools, complete_with_retries,
+                          llm_retry_reporter)
 
 READ_ONLY_TOOLS = {"browser_navigate", "browser_click", "browser_type", "browser_select",
                    "browser_fill_credential", "browser_back", "browser_snapshot", "read_document", "list_downloads"}
@@ -84,7 +85,8 @@ class Verifier:
         rec.emit("verification_started", actor="verifier")
         try:
             for _ in range(self.max_steps):
-                turn = await complete_with_retries(convo, worker_ctx.cancel)
+                turn = await complete_with_retries(convo, worker_ctx.cancel,
+                                                  on_retry=llm_retry_reporter(rec, "verifier"))
                 usage.add(turn.usage)
                 if turn.text or turn.reasoning:
                     rec.emit("thought", actor="verifier", text=turn.text, reasoning=turn.reasoning)

@@ -16,6 +16,13 @@ TEST_PORT = int(os.environ.get("TEST_SANDBOX_PORT", "8011"))
 BASE = f"http://127.0.0.1:{TEST_PORT}"
 
 
+@pytest.fixture(autouse=True)
+def fast_llm_retries(monkeypatch):
+    """Real runs wait up to ~2 minutes for a flaky LLM; tests keep the retry count but not the waits."""
+    from worker import tools
+    monkeypatch.setattr(tools, "LLM_RETRY_WAITS_S", (0, 0, 0, 0))
+
+
 @pytest.fixture(scope="session")
 def sandbox_url():
     """The real sandbox app, served on a test port for browser-driven tests."""

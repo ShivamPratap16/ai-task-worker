@@ -35,6 +35,8 @@ export interface Finished {
   summary?: string;
   claims?: string[];
   evidence?: string[];
+  /** Writes the worker attempted, from the execution log (not the model's account). */
+  changes?: { action: string; page: string }[];
   verification?: Verification | null;
   steps?: number;
   duration_s?: number;

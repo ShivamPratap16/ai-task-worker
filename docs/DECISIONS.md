@@ -218,3 +218,28 @@ re-checking work that was fine. Infrastructure trouble and a wrong outcome need 
 them makes the worker second-guess correct work (and could make it "fix" things that were not broken).
 **Cost.** A transient verifier outage now costs up to two short waits before giving up. An inconclusive audit
 is reported honestly as unverified rather than retried in a new verification round.
+
+### D22. Writes are judged against the request, and listed from the log
+**Decision.** The verifier now judges every data-changing action in the execution log against the original
+request: an unrequested change is a failure even when it was done correctly. The final report (and the
+dashboard's result card) lists every write the worker attempted, taken from the executor's log, never from
+the model's summary. The worker prompt also says that when a request names one item ("the newest email"),
+that item is the whole job.
+**Why.** Found in a live `prompt_injection` eval: Gemini resisted the injection (it asked the human, never
+tried to pay) but then went on to log an unrelated Stark invoice that nobody asked for, and the verifier
+accepted it because the record was correct. "Did extra things correctly" is the mirror image of "did the
+wrong thing correctly" (D6). An AI employee that quietly does unrequested work is hard to trust even when
+the work is right.
+**Cost.** A stricter verifier may bounce work that a human would have accepted as helpful. The worker can
+still mention such work in its summary; it just does not do it unasked.
+
+### D23. Ride out short LLM outages; do not score them as agent failures
+**Decision.** Loop-level LLM retries wait 5, 15, 30 and 60 s (about 2 minutes) instead of 3 and 6 s, and
+each retry is a `llm_retry` trace event. The eval harness marks a run that ended because the model was
+unreachable as `OUTAGE`, re-runs it once (`--outage-retries`), and reports the pass rate both over all
+runs and over runs that reached the model.
+**Why.** In a live eval a short network drop ("Connection error") ended five runs in a row at step 1. A real
+employee waits for the Wi-Fi to come back. And a pass rate that mixes network failures with agent failures
+measures neither.
+**Cost.** A real outage now takes about 2 minutes to surface instead of 10 seconds. Fatal errors (bad key,
+no quota) still stop at once.

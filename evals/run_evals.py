@@ -59,6 +59,7 @@ def run_one(task, chaos: str, seed: int, settings: Settings) -> dict:
     models = list(dict.fromkeys([result["model"]] + [e.data["to"] for e in events if e.type == "model_switched"]))
     return {
         "task": task.id, "category": task.category, "passed": passed, "outcome": result["outcome"],
+        "provider_outage": _provider_outage(result),
         "checks": [{"check": c, "ok": ok} for c, ok in checks],
         "verifier_said_achieved": v["achieved"] if v else None,
         "verifier_agrees": (v["achieved"] == passed) if v else None,
@@ -74,12 +75,23 @@ def run_one(task, chaos: str, seed: int, settings: Settings) -> dict:
     }
 
 
+def _verdict(row: dict) -> str:
+    return "PASS" if row["passed"] else "OUTAGE" if row["provider_outage"] else "FAIL"
+
+
+def _provider_outage(result: dict) -> bool:
+    """The run ended because the LLM was unreachable: that grades the network, not the agent."""
+    return result["outcome"] == "error" and result["summary"].startswith("The language model was unavailable")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", nargs="*", help="task ids (default: all)")
     ap.add_argument("--chaos", default="realistic", choices=["off", "realistic", "hostile"])
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--outage-retries", type=int, default=1,
+                    help="re-run a task this many times if the LLM provider was unreachable (default 1)")
     ap.add_argument("--out", type=Path, default=ROOT / "evals" / "results", help="results directory")
     args = ap.parse_args()
 
@@ -100,9 +112,14 @@ def main() -> int:
         for task in selected:
             print(f"[{rep + 1}/{args.repeat}] {task.id} ...", flush=True)
             row = run_one(task, args.chaos, args.seed + rep, settings)
+            for _ in range(args.outage_retries):
+                if not row["provider_outage"]:
+                    break
+                print("    provider outage; re-running the task", flush=True)
+                row = run_one(task, args.chaos, args.seed + rep, settings) | {"rerun_after_outage": True}
             rows.append(row)
             fails = [c["check"] for c in row["checks"] if not c["ok"]]
-            print(f"    {'PASS' if row['passed'] else 'FAIL'}  outcome={row['outcome']}  steps={row['steps']}  "
+            print(f"    {_verdict(row)}  outcome={row['outcome']}  steps={row['steps']}  "
                   f"{row['duration_s']:.0f}s  {fmt_cost(row['models'][-1], row['cost_usd'])}  "
                   f"faults={len(row['faults_injected'])}  verifier_agrees={row['verifier_agrees']}"
                   + (f"  failed: {fails}" if fails else ""), flush=True)
@@ -114,17 +131,21 @@ def main() -> int:
 
     n = len(rows)
     passed = sum(r["passed"] for r in rows)
+    outages = sum(r["provider_outage"] for r in rows)
     judged = [r for r in rows if r["verifier_agrees"] is not None]
     lines = [f"# Eval results {stamp}", "",
              f"Model: {settings.model_label()} | chaos: {args.chaos} | seed: {args.seed} | runs: {n}", "",
-             f"**Pass rate: {passed}/{n}**  |  verifier agreement with ground truth: "
-             f"{sum(r['verifier_agrees'] for r in judged)}/{len(judged)}", "",
+             f"**Pass rate: {passed}/{n}**"
+             + (f" ({outages} lost to LLM provider outages; {passed}/{n - outages} of runs that reached the model)"
+                if outages else "")
+             + f"  |  verifier agreement with ground truth: {sum(r['verifier_agrees'] for r in judged)}/{len(judged)}",
+             "",
              "| task | category | result | outcome | model | steps | duration | faults injected | auto-retries "
              "| failed actions | tokens in/out (cached) | cost |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         u = r["usage"]
-        lines.append(f"| {r['task']} | {r['category']} | {'PASS' if r['passed'] else 'FAIL'} | {r['outcome']} | "
+        lines.append(f"| {r['task']} | {r['category']} | {_verdict(r)} | {r['outcome']} | "
                      f"{' -> '.join(r['models'])} | {r['steps']} | {r['duration_s']:.0f}s | "
                      f"{len(r['faults_injected'])} | {r['auto_retries']} | {r['failed_actions']} | "
                      f"{u['input_tokens']:,}/{u['output_tokens']:,} ({u.get('cache_read_tokens', 0):,}) | "

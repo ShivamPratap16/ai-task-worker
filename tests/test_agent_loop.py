@@ -46,6 +46,8 @@ def test_denied_approval_blocks_payment(run_worker, reset_sandbox, sandbox_state
     inv = next(i for i in sandbox_state()["invoices"] if i["id"] == 2)
     assert inv["status"] == "Pending", "a denied action must not reach the system"
     assert any(e.type == "approval_requested" for e in rec.events)
+    assert result.changes == [], "a denied action is not reported as a change"
+    assert "## Changes attempted in company systems" in (rec.run_dir / "report.md").read_text(encoding="utf-8")
 
 
 def test_approved_action_goes_through(run_worker, reset_sandbox, sandbox_state, sandbox_url):
@@ -64,6 +66,8 @@ def test_approved_action_goes_through(run_worker, reset_sandbox, sandbox_state, 
     result, _ = run_worker(ScriptedProvider(worker), human)
     assert result.approvals["granted"] == 1
     assert next(i for i in sandbox_state()["invoices"] if i["id"] == 2)["status"] == "Submitted for payment"
+    # The report lists the write from the execution log, whatever the model's summary says ("done").
+    assert [c["action"] for c in result.changes] == ["Submit for payment"]
 
 
 def test_false_completion_is_rejected_by_verifier(run_worker, reset_sandbox):
@@ -123,6 +127,25 @@ def test_verifier_retries_a_transient_llm_error(run_worker, reset_sandbox):
 
     result, _ = run_worker(ScriptedProvider(worker, verifier), ScriptedHumanChannel([]))
     assert result.outcome == "completed_verified"
+
+
+def test_worker_rides_out_a_network_outage(run_worker, reset_sandbox):
+    """Found in a live eval: a short connection drop ended five runs in a row at step 1. Several
+    consecutive transient errors are retried (and traced); only a longer outage ends the run."""
+    reset_sandbox("off")
+    calls = []
+
+    def worker(t: Transcript):
+        calls.append(1)
+        if len(calls) <= 4:
+            raise LLMError("gemini API error: Connection error.")
+        return turn(call("finish", status="blocked", summary="stopping", claims=[]))
+
+    result, rec = run_worker(ScriptedProvider(worker), ScriptedHumanChannel([]))
+    assert result.outcome == "blocked"
+    retries = [e for e in rec.events if e.type == "llm_retry"]
+    assert [e.data["attempt"] for e in retries] == [1, 2, 3, 4]
+    assert "Connection error" in retries[0].data["error"]
 
 
 def test_inconclusive_audit_is_not_sent_back_as_findings(run_worker, reset_sandbox):

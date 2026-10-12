@@ -63,17 +63,32 @@ async def until_cancelled(awaitable, cancel: threading.Event):
             raise RunCancelled()
 
 
-async def complete_with_retries(convo, cancel: threading.Event, attempts: int = 3):
-    """One LLM turn, with a few loop-level retries on top of the SDK's own (e.g. a provider's 503 "high demand").
-    Fatal errors (no credit, bad key) are raised at once. Cancellable throughout."""
+# Waits between loop-level LLM retries. Long enough to ride out a short network drop or a provider's
+# "high demand" spell (about 2 minutes in total); the SDK's own quick retries come first.
+LLM_RETRY_WAITS_S = (5, 15, 30, 60)
+
+
+async def complete_with_retries(convo, cancel: threading.Event, on_retry=None):
+    """One LLM turn, with loop-level retries on top of the SDK's own (connection drops, a provider's 503
+    "high demand"). Fatal errors (no credit, bad key) are raised at once. Cancellable throughout."""
     from worker.llm.base import LLMError
-    for attempt in range(attempts):
+    for attempt in range(len(LLM_RETRY_WAITS_S) + 1):
         try:
             return await until_cancelled(convo.complete(), cancel)
         except LLMError as exc:
-            if exc.fatal or attempt == attempts - 1:
+            if exc.fatal or attempt == len(LLM_RETRY_WAITS_S):
                 raise
-            await until_cancelled(asyncio.sleep(3 * (attempt + 1)), cancel)
+            wait = LLM_RETRY_WAITS_S[attempt]
+            if on_retry:
+                on_retry(attempt + 1, wait, str(exc))
+            await until_cancelled(asyncio.sleep(wait), cancel)
+
+
+def llm_retry_reporter(recorder, actor: str):
+    """on_retry callback that puts each LLM retry in the trace, so a slow step is explained."""
+    def report(attempt: int, wait_s: float, error: str) -> None:
+        recorder.emit("llm_retry", actor=actor, attempt=attempt, wait_s=wait_s, error=error[:300])
+    return report
 
 
 async def _evidence(ctx: "ToolContext", label: str) -> str | None:

@@ -22,7 +22,8 @@ from worker.human import HumanChannel
 from worker.llm import LLMError, LLMProvider, ToolResult, Usage, make_provider
 from worker.memory import LessonStore, Vault, WorkingMemory, load_company_context
 from worker.prompts import worker_system
-from worker.tools import RunCancelled, ToolContext, ToolExecutor, build_tools, complete_with_retries
+from worker.tools import (RunCancelled, ToolContext, ToolExecutor, build_tools, complete_with_retries,
+                          llm_retry_reporter)
 from worker.verifier import Verdict, Verifier
 
 STALL_REPEATS = 3          # identical action this many times in a row -> intervene
@@ -40,6 +41,7 @@ class RunResult:
     evidence: list[str] = field(default_factory=list)
     verification: dict | None = None
     facts: dict = field(default_factory=dict)
+    changes: list[dict] = field(default_factory=list)  # writes the worker attempted, from the execution log
     steps: int = 0
     duration_s: float = 0.0
     usage: dict = field(default_factory=dict)
@@ -114,6 +116,7 @@ class Worker:
                         for s in ctx.plan]
             recorder.emit("plan", actor="worker", steps=ctx.plan)
         result.facts = dict(ctx.memory.facts)
+        result.changes = [{"action": m["action"], "page": m["page"]} for m in ctx.mutations]
         result.duration_s = round(time.time() - started, 1)
         result.usage = asdict(usage)
         result.approvals = {"granted": ctx.approvals_granted, "denied": ctx.approvals_denied}
@@ -124,7 +127,8 @@ class Worker:
 
     async def _complete(self, convo, usage: Usage, ctx: ToolContext):
         try:
-            turn = await complete_with_retries(convo, ctx.cancel)
+            turn = await complete_with_retries(convo, ctx.cancel,
+                                              on_retry=llm_retry_reporter(ctx.recorder, "worker"))
             usage.add(turn.usage)
             return turn
         finally:
@@ -260,6 +264,9 @@ def render_report(r: RunResult) -> str:
         lines += [f"- {'PASS' if c.get('passed') else 'FAIL'} - {c.get('check')}: {c.get('evidence', '')}"
                   for c in v.get("checks", [])]
         lines += [f"- Issue: {i}" for i in v.get("issues", [])] + [""]
+    lines += ["## Changes attempted in company systems (from the execution log)", ""]
+    lines += [f"- {c['action']} on {c['page']}" for c in r.changes] or ["- none"]
+    lines += [""]
     if r.facts:
         lines += ["## Facts recorded", ""] + [f"- {k}: {v}" for k, v in r.facts.items()] + [""]
     lines += ["## Run stats", "", f"- Steps: {r.steps}", f"- Duration: {r.duration_s}s",

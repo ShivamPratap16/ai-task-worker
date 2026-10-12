@@ -30,7 +30,8 @@ export function ResultCard({ runId, f, shots = [] }: Props) {
   const evidenceShots = shots.slice(-2);
   const claims = f.claims ?? [];
   const evidence = f.evidence ?? [];
-  const hasLeft = claims.length > 0 || evidence.length > 0 || evidenceShots.length > 0;
+  const changes = f.changes;
+  const hasLeft = claims.length > 0 || evidence.length > 0 || evidenceShots.length > 0 || changes !== undefined;
 
   return (
     <div className={cx("card result", o.tone, !open && "collapsed")}>
@@ -55,6 +56,14 @@ export function ResultCard({ runId, f, shots = [] }: Props) {
                     const [k, val] = splitClaim(c);
                     return <li key={i} className={k ? "" : "plain"}>{k && <span className="k">{k}</span>}<span className="v">{val}</span></li>;
                   })}
+                </ul>
+              </>}
+              {changes !== undefined && <>
+                <div className="label"><span>Changes made</span><span className="mono lc">from the execution log</span></div>
+                <ul className="claims">
+                  {changes.length
+                    ? changes.map((c, i) => <li key={i}><span className="k">{c.action}</span><span className="v">{c.page.replace(/^https?:\/\/[^/]+/, "")}</span></li>)
+                    : <li className="plain"><span className="v">None: nothing in company systems was changed.</span></li>}
                 </ul>
               </>}
               {(!!evidence.length || !!evidenceShots.length) && (
