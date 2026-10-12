@@ -140,6 +140,18 @@ def cmd_check(args) -> int:
     return 1
 
 
+def cmd_inspect(args) -> int:
+    from worker.config import Settings
+    from worker.inspect_run import find_run, load_events, step_detail, summary, timeline
+    run_dir = find_run(Settings.from_env().runs_dir, args.run)
+    events = load_events(run_dir)
+    if args.step:
+        print(step_detail(events, args.step))
+    else:
+        print("\n".join(summary(run_dir, events) + timeline(events, failures_only=args.failures)))
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
     uvicorn.run("worker.server:app", host="127.0.0.1", port=args.port, log_level="warning")
@@ -159,6 +171,11 @@ def main() -> int:
     p_replay.add_argument("cassette")
     p_replay.add_argument("--headed", action="store_true", help="show the browser window")
     p_replay.set_defaults(fn=cmd_replay)
+    p_inspect = sub.add_parser("inspect", help="print a run's timeline from its trace (debugging)")
+    p_inspect.add_argument("run", nargs="?", default="latest", help="run id, unique prefix, path, or 'latest'")
+    p_inspect.add_argument("--step", type=int, help="show everything about action #N, incl. what the model saw")
+    p_inspect.add_argument("--failures", action="store_true", help="only errors, retries, blocks and verdicts")
+    p_inspect.set_defaults(fn=cmd_inspect)
     p_serve = sub.add_parser("serve", help="start the dashboard")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.set_defaults(fn=cmd_serve)

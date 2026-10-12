@@ -18,6 +18,15 @@ It runs against **Acme Corp**, a sandboxed company with a shared AP mailbox and 
 
 > **Demo video:** **TODO: add link** (not recorded yet)
 
+### Five-minute tour for reviewers
+| If you want to see... | Do this |
+|---|---|
+| A real model run, without an API key | `python -m sandbox`, then `python -m worker replay cassettes/<cassette>.json --headed` ([details](#watch-a-recorded-run-without-an-api-key)) |
+| That the safety claims hold whatever the model does | `python -m pytest tests/test_injection.py tests/test_agent_loop.py` (no key; a scripted, fully persuaded model cannot get a payment through) |
+| How well it actually works | [Evaluation results](#results): 7 task types graded on the sandbox's real state, not on the agent's report |
+| Why it is built this way | [`docs/DECISIONS.md`](docs/DECISIONS.md): every decision with its reason and cost, including what live runs taught me |
+| What happened inside a run | `python -m worker inspect latest --failures` ([debugging a run](#debugging-a-run)) |
+
 ---
 
 ## Quick start
@@ -73,6 +82,20 @@ python -m pytest                           # full test suite incl. a browser-dri
 ```
 
 The sandbox is also usable by hand at http://127.0.0.1:8001 (ERP login: `ap.agent` / `Acme!2026`).
+
+### Debugging a run
+Every run writes `runs/<id>/trace.jsonl` (every model turn, action, observation, retry, approval and verdict),
+plus screenshots, downloads and `report.md`. The dashboard shows it visually; the terminal view is:
+
+```bash
+python -m worker inspect latest              # numbered timeline: action, args, result, intent
+python -m worker inspect latest --failures   # only errors, HTTP 5xx pages, policy blocks, retries, verdicts
+python -m worker inspect <run-id> --step 24  # one action in full, including the exact page text the model saw next
+```
+
+A typical session: `--failures` shows where it went wrong, `--step N` shows what the model was looking at when it
+decided, and the matching screenshot in `runs/<id>/screenshots/` shows what a human would have seen. To reproduce
+a model run exactly, record it (`LLM_RECORD=1`) and replay the cassette.
 
 ### Watch a recorded run without an API key
 Cassettes in `cassettes/` are real model runs (every model turn, plus the human approvals). Replaying one
@@ -182,6 +205,9 @@ The full reasoning and trade-offs are in [`docs/DECISIONS.md`](docs/DECISIONS.md
   the *original request*, not from the worker's claims. This catches "did the wrong thing correctly".
 - **Reliability layered by who should handle each failure**: infrastructure retries in code, judgment
   calls (fix the date, re-enter lost data, sign in again) in the model, loop-level guards against thrashing.
+- **Writes are judged against the request.** The verifier fails unrequested changes even when they were done
+  correctly, and every report lists the writes the worker attempted, taken from the execution log rather than
+  from the model's summary.
 - **Every action carries a stated intent**, and model reasoning is summarized into the trace, so any decision
   can be explained after the fact.
 - **Secrets never enter the model context**: the vault fills credentials by id.
@@ -205,6 +231,7 @@ The full reasoning and trade-offs are in [`docs/DECISIONS.md`](docs/DECISIONS.md
 | Repeats the same failing action | The loop's stall detector tells it to change approach |
 | LLM out of credit, daily quota used up, bad key, unknown model | Fails fast with a clear message instead of retrying |
 | LLM per-minute rate limit (free tiers) | Paces requests client-side; if still limited, waits 20–60 s and retries |
+| LLM connection drop or provider 503 ("high demand") | Retries for about 2 minutes (5, 15, 30, 60 s), each retry visible in the trace; evals score a run lost to an outage as `OUTAGE`, not as an agent failure |
 
 ---
 
@@ -313,7 +340,7 @@ ai-task-worker/
 ├── start.py               # launch sandbox + dashboard
 ├── worker/                # the AI worker
 │   ├── agent.py  tools.py  browser.py  policy.py  verifier.py  memory.py  prompts.py
-│   ├── events.py  runner.py  server.py  config.py  human.py  quota.py  __main__.py
+│   ├── events.py  runner.py  server.py  config.py  human.py  quota.py  inspect_run.py  __main__.py
 │   └── llm/                # provider-neutral base + Claude, OpenAI-protocol and scripted adapters
 ├── sandbox/               # Acme Corp: app.py, seed.py, templates/
 ├── evals/                 # tasks.py, run_evals.py, pricing.py, results/
