@@ -264,3 +264,16 @@ from the attacker, and that the feedback channel from auditor to worker is itsel
 ones: the approval gate on high-impact actions, the read-only verifier, and the write log in every report
 (D22). A stronger next step is to give the auditor the content's provenance (which text came from inbound
 email) so it can be filtered or quoted rather than read as instructions.
+
+### D25. Fill a whole form in one action instead of raising the step budget
+**Decision.** A `browser_fill_form` tool fills several fields in one call (text fields typed, dropdowns
+selected by visible text). It never submits; the model clicks the submit button separately, so the approval
+gate still sees every submit. It stops at the first failing field and says which fields were already filled.
+**Why.** In both live evals the batch task (`log_all_missing`: three invoices) ran out of its 60-step budget.
+The traces showed why: about 8 tool calls per form (one per field, plus save), and a 503 on save meant all 8
+again. The model's judgement was fine (it wrapped up honestly as `blocked` and the verifier agreed); the
+interface was wasteful. Raising the budget would have hidden that. Cutting a form entry to two calls makes
+every data-entry task faster and cheaper: fewer LLM requests, less context, less free-tier quota.
+**Cost.** One more tool for the model to choose from (the single-field tools stay for search boxes and
+corrections). A partly filled form after a failure is reported, not rolled back; the form is only saved by
+an explicit submit, so nothing reaches the system of record.

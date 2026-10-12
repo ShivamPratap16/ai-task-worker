@@ -228,6 +228,25 @@ async def browser_select(ctx: ToolContext, args: dict) -> ToolOutcome:
     return await _observe(ctx, f"Selected '{chosen}' in [{args['ref']}].")
 
 
+async def browser_fill_form(ctx: ToolContext, args: dict) -> ToolOutcome:
+    """Fill several fields in one action (text fields typed, dropdowns selected); never submits.
+    Stops at the first field that fails and says which fields were already filled."""
+    done: list[str] = []
+    for field_ in args["fields"]:
+        ref, value = field_["ref"], str(field_["value"])
+        try:
+            if (await ctx.browser.describe(ref))["tag"] == "select":
+                done.append(f"[{ref}] selected '{await ctx.browser.select(ref, value)}'")
+            else:
+                await ctx.browser.type(ref, value)
+                done.append(f"[{ref}] typed")
+        except BrowserActionError as exc:
+            filled = "; ".join(done) or "none"
+            raise BrowserActionError(f"Field [{ref}] failed: {exc} (already filled: {filled})", exc.kind,
+                                     retryable=exc.retryable) from exc
+    return await _observe(ctx, f"Filled {len(done)} field(s): {'; '.join(done)}. Nothing was submitted.")
+
+
 async def browser_fill_credential(ctx: ToolContext, args: dict) -> ToolOutcome:
     try:
         secret = ctx.vault.get(args["credential_id"], args["field"])
@@ -366,6 +385,13 @@ def build_tools() -> dict[str, Tool]:
                       _schema({"ref": {"type": "integer"}, "option": {"type": "string"}, "intent": INTENT},
                               ["ref", "option", "intent"])),
              browser_select, browser_action=True),
+        Tool(ToolSpec("browser_fill_form", "Fill several fields of a form in one action: text fields are "
+                      "replaced with `value`, dropdowns get the option whose visible text matches `value`. Prefer "
+                      "this to one browser_type per field. It never submits; click the submit button afterwards.",
+                      _schema({"fields": {"type": "array", "minItems": 1, "items": _schema(
+                                  {"ref": {"type": "integer"}, "value": {"type": "string"}}, ["ref", "value"])},
+                               "intent": INTENT}, ["fields", "intent"])),
+             browser_fill_form, browser_action=True),
         Tool(ToolSpec("browser_fill_credential", "Type a secret from the credential vault into a field without "
                       "revealing it. Use for usernames/passwords listed in the company context.",
                       _schema({"ref": {"type": "integer"}, "credential_id": {"type": "string"},

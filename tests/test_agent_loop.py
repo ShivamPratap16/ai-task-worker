@@ -294,3 +294,40 @@ def test_unverified_run_keeps_plan_as_is(run_worker, reset_sandbox):
 
     result, rec = run_worker(ScriptedProvider(worker), ScriptedHumanChannel([]))
     assert [e.data["steps"] for e in rec.events if e.type == "plan"][-1][0]["status"] == "pending"
+
+
+def test_fill_form_enters_a_whole_invoice_in_one_step(run_worker, reset_sandbox, sandbox_state, sandbox_url):
+    """One browser_fill_form call fills text fields and dropdowns; it never submits (the Save click does).
+    Found in a live eval: a 3-invoice batch ran out of steps at ~8 tool calls per form."""
+    reset_sandbox("off")
+
+    def fields(t: Transcript, vendor: str) -> list[dict]:
+        return [{"ref": t.ref("combobox", "Vendor"), "value": vendor},
+                {"ref": t.ref("textbox", "Invoice number"), "value": "STK-3317"},
+                {"ref": t.ref("textbox", "Amount (total due)"), "value": "8440.00"},
+                {"ref": t.ref("combobox", "Currency"), "value": "USD"},
+                {"ref": t.ref("textbox", "Invoice date"), "value": "2026-10-06"},
+                {"ref": t.ref("textbox", "Due date"), "value": "2026-10-21"}]
+
+    def worker(t: Transcript):
+        step = t.turns()
+        if (s := login_steps(t, step, sandbox_url)) is not None:
+            return s
+        if step == 4:
+            return turn(call("browser_navigate", url=f"{sandbox_url}/erp/invoices/new", intent=INTENT))
+        if step == 5:
+            return turn(call("browser_fill_form", fields=fields(t, "No Such Vendor"), intent=INTENT))
+        if step == 6:
+            assert "Field [" in t.last_observation and "No option matching" in t.last_observation
+            assert "already filled: none" in t.last_observation
+            return turn(call("browser_fill_form", fields=fields(t, "Stark Industrial"), intent=INTENT))
+        if step == 7:
+            assert "Filled 6 field(s)" in t.last_observation and "Nothing was submitted" in t.last_observation
+            assert len(sandbox_state()["invoices"]) == 3, "filling a form must not submit it"
+            return turn(call("browser_click", ref=t.ref("button", "Save invoice"), intent=INTENT))
+        return turn(call("finish", status="blocked", summary="saved", claims=[]))
+
+    run_worker(ScriptedProvider(worker), ScriptedHumanChannel([]))
+    created = [i for i in sandbox_state()["invoices"] if i["number"] == "STK-3317"]
+    assert len(created) == 1
+    assert (created[0]["vendor_id"], created[0]["amount"], created[0]["due_date"]) == (4, 8440.0, "2026-10-21")
