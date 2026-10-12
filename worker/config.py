@@ -31,13 +31,16 @@ class ProviderInfo:
     base_url: str | None = None  # None = the SDK's default endpoint
     default_rpm: int = 0         # client-side requests/minute cap (0 = none); free tiers need one
     free_tier: bool = False
+    fallback_models: tuple[str, ...] = ()  # tried in order when a model's daily quota runs out
 
 
 PROVIDERS: dict[str, ProviderInfo] = {
     "anthropic": ProviderInfo("ANTHROPIC_API_KEY", "claude-opus-5-5"),
-    "gemini": ProviderInfo("GEMINI_API_KEY", "gemini-2.5-flash",
+    "gemini": ProviderInfo("GEMINI_API_KEY", "gemini-3.1-flash-lite",
                            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-                           default_rpm=8, free_tier=True),
+                           default_rpm=8, free_tier=True,
+                           # Free-tier quotas are per model, so another model usually still has requests left.
+                           fallback_models=("gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite")),
     "openai": ProviderInfo("OPENAI_API_KEY", "gpt-5.4"),
     # Any OpenAI-compatible server: Ollama (http://localhost:11434/v1), OpenRouter, Groq, vLLM, ...
     "openai_compatible": ProviderInfo("LLM_API_KEY", "", base_url=None),
@@ -60,6 +63,7 @@ class Settings:
     reasoning_effort: str = ""             # OpenAI-protocol reasoning models: low | medium | high
     base_url: str = ""                     # overrides the provider's endpoint (needed for openai_compatible)
     rpm: int = -1                          # requests/minute cap; -1 = provider default, 0 = unlimited
+    fallback_models: tuple[str, ...] | None = None  # None = the provider's defaults; () = never switch
     # Agent loop budgets
     max_steps: int = 60
     max_verification_rounds: int = 2
@@ -72,6 +76,7 @@ class Settings:
     headless: bool = True
     # Behaviour
     approval_mode: str = "risky"            # "risky" | "always" | "never"
+    plan_review: bool = False               # operator approves the plan before the worker acts
     use_lessons: bool = True
     # Paths
     runs_dir: Path = ROOT / "runs"
@@ -91,6 +96,9 @@ class Settings:
             max_steps=int(os.environ.get("WORKER_MAX_STEPS", cls.max_steps)),
             headless=_bool("WORKER_HEADLESS", True),
             approval_mode=os.environ.get("WORKER_APPROVAL_MODE", cls.approval_mode),
+            plan_review=_bool("WORKER_PLAN_REVIEW", False),
+            fallback_models=(None if os.environ.get("LLM_FALLBACK_MODELS") is None else
+                             tuple(m.strip() for m in os.environ["LLM_FALLBACK_MODELS"].split(",") if m.strip())),
             use_lessons=_bool("WORKER_USE_LESSONS", True),
             start_url=os.environ.get("WORKER_START_URL", cls.start_url),
         )
@@ -117,6 +125,11 @@ class Settings:
         if not model:
             raise RuntimeError(f"Set LLM_MODEL for provider {name!r}.")
         return model
+
+    def resolved_fallbacks(self) -> list[str]:
+        models = PROVIDERS[self.resolved_provider()].fallback_models if self.fallback_models is None             else self.fallback_models
+        primary = self.resolved_model()
+        return [m for m in dict.fromkeys(models) if m != primary]
 
     def resolved_rpm(self) -> int:
         return PROVIDERS[self.resolved_provider()].default_rpm if self.rpm < 0 else self.rpm

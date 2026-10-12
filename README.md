@@ -38,13 +38,36 @@ In the dashboard, pick an example task (or write your own). Tick **show browser*
 You'll see the plan, every action with its stated intent, page observations with screenshots, automatic
 retries, approval requests (approve or deny right there), and the verifier's checks.
 
+The dashboard is a React + TypeScript app in `frontend/`. Its production build is committed to `ui/dist`, so
+`python start.py` needs no Node. To change it:
+
+```bash
+cd frontend && npm install
+npm run dev      # hot-reload UI on http://localhost:5173 (proxies /api to the server on :8000)
+npm run build    # type-check, then rebuild ui/dist
+```
+
+Views: **Overview** (KPIs, runs per day, outcome mix, recent runs), and per run **Activity** (live timeline),
+**Trace** (latency waterfall of every tool step) and **Flow** (the plan as a workflow canvas). Any step opens an
+inspector with its input, output and screenshot.
+
+Operator controls in the dashboard:
+- **Review plan first**: the worker shows its plan and waits for your approval (or requested changes) before acting.
+- **Message the worker** mid-run, for example "use the Globex Corp vendor record"; it arrives with the next step.
+- **Approval cards** show a screenshot of the page at the moment the worker asked.
+- **Stop** takes effect immediately, even while the worker is waiting for an approval or a rate limit.
+- Desktop notifications and a "(1) Needs you" tab title when the worker needs you; a report download when it finishes.
+- Run history survives restarts (reloaded from `runs/*/trace.jsonl`).
+- A daily request counter per model. On free tiers, when a model's daily quota runs out mid-run, the worker
+  switches to the next backup model (`LLM_FALLBACK_MODELS`) and keeps its history.
+
 Other entry points:
 
 ```bash
 python -m worker run "Log every vendor invoice in the AP mailbox that isn't in FinOps yet." --headed
 python -m sandbox --chaos hostile          # sandbox only; chaos: off | realistic | hostile
 python -m evals.run_evals                  # eval suite (needs the sandbox running)
-python -m pytest                           # 31 tests, no API key needed (~40 s)
+python -m pytest                           # 41 tests incl. a browser-driven dashboard test; no API key needed
 ```
 
 The sandbox is also usable by hand at http://127.0.0.1:8001 (ERP login: `ap.agent` / `Acme!2026`).
@@ -194,7 +217,7 @@ harness also records whether the worker's verifier agreed with ground truth.
   - Claude Opus 5.5 (`claude-opus-5-5`) via the Anthropic Python SDK, with adaptive thinking (summarized),
     effort `high`, prompt caching (static prefix plus automatic history caching), server-side refusal fallback,
     and server-side clearing of stale tool results.
-  - Google Gemini (free tier, default `gemini-2.5-flash`), OpenAI (`gpt-5.4`), or any OpenAI-compatible server,
+  - Google Gemini (free tier, default `gemini-3.1-flash-lite`, with automatic backup models when a daily quota runs out), OpenAI (`gpt-5.4`), or any OpenAI-compatible server,
     through one Chat Completions adapter (`openai` Python SDK with a different base URL), with client-side rate
     pacing and quota-aware error handling.
 - **Browser automation:** Playwright (Chromium, or installed Chrome/Edge).
@@ -219,7 +242,8 @@ harness also records whether the worker's verifier agreed with ground truth.
 - **Single-tab, single-browser** worker. No desktop apps, no parallel sub-tasks.
 - **The verifier is an LLM.** It is independent and grounded, but not infallible; its agreement with ground truth is measured, not assumed.
 - **Lessons are unreviewed.** In production they should go through human review before being trusted.
-- **In-memory run registry** in the dashboard (traces persist on disk, but the run list resets on restart).
+- **Runs do not resume after a restart.** History is reloaded from disk, but a run that was in progress when the
+  server stopped is shown as interrupted rather than continued.
 - The sandbox is far simpler than real enterprise software, though its failure modes are realistic.
 
 ## What I'd build next
@@ -230,7 +254,7 @@ harness also records whether the worker's verifier agreed with ground truth.
 3. **Skill library**: promote successful traces into reusable, parameterized procedures (with human review),
    so repeat tasks become faster, cheaper and more predictable, and the LLM only handles deviations.
 4. **Durable execution**: checkpoint runs (Temporal-style) so a worker can wait days for an approval, survive restarts
-   and resume mid-task. Persist the run registry.
+   and resume mid-task.
 5. **Multi-channel humans**: approvals via Slack or email with an expiring context link; escalation rules.
 6. **Larger eval suite** with adversarial variants (prompt injection in documents, UI changes), cost/latency
    tracking per task, and regression gating in CI.
@@ -247,7 +271,8 @@ ai-task-worker/
 │   └── llm/  base.py  anthropic_provider.py  openai_provider.py  scripted.py
 ├── sandbox/               # Acme Corp: app.py, seed.py, templates/
 ├── evals/                 # tasks.py, run_evals.py, results/
-├── ui/index.html          # dashboard
+├── frontend/              # dashboard source (React + TypeScript, Vite)
+├── ui/dist/               # built dashboard, served by worker/server.py
 ├── knowledge/company.md   # onboarding doc (+ lessons.md, written by the worker)
 ├── config/vault.json      # sandbox credentials (never shown to the model)
 ├── docs/DECISIONS.md      # design decisions and trade-offs

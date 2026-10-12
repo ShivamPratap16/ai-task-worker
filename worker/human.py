@@ -29,11 +29,20 @@ class HumanResponse:
     approved: bool | None = None   # set for approvals
     responder: str = "human"
     timed_out: bool = False
+    cancelled: bool = False        # the run was stopped while waiting
+
+
+CANCELLED = HumanResponse(answer="The run was cancelled by the operator.", approved=False, responder="operator",
+                          cancelled=True)
 
 
 class HumanChannel(ABC):
     @abstractmethod
     async def ask(self, request: HumanRequest, timeout_s: float) -> HumanResponse: ...
+
+    def drain_messages(self) -> list[str]:
+        """Messages the operator sent mid-run, not yet delivered to the worker."""
+        return []
 
 
 class WebHumanChannel(HumanChannel):
@@ -42,6 +51,26 @@ class WebHumanChannel(HumanChannel):
     def __init__(self) -> None:
         self._pending: dict[str, tuple[threading.Event, list[HumanResponse], HumanRequest]] = {}
         self._lock = threading.Lock()
+        self._inbox: list[str] = []
+        self._closed = False
+
+    def post_message(self, text: str) -> None:
+        with self._lock:
+            self._inbox.append(text)
+
+    def drain_messages(self) -> list[str]:
+        with self._lock:
+            messages, self._inbox = self._inbox, []
+        return messages
+
+    def close(self) -> None:
+        """Run cancelled: release every pending wait now, and answer any later request immediately."""
+        with self._lock:
+            self._closed = True
+            entries = list(self._pending.values())
+        for event, box, _ in entries:
+            box.append(CANCELLED)
+            event.set()
 
     def pending(self) -> list[HumanRequest]:
         with self._lock:
@@ -60,6 +89,8 @@ class WebHumanChannel(HumanChannel):
     async def ask(self, request: HumanRequest, timeout_s: float) -> HumanResponse:
         event, box = threading.Event(), []
         with self._lock:
+            if self._closed:
+                return CANCELLED
             self._pending[request.id] = (event, box, request)
         try:
             answered = await asyncio.to_thread(event.wait, timeout_s)

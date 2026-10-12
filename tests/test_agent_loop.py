@@ -199,3 +199,34 @@ def test_attachment_download_and_read(run_worker, reset_sandbox, sandbox_url):
 
     result, _ = run_worker(ScriptedProvider(worker), ScriptedHumanChannel([]))
     assert result.outcome == "failed"
+
+
+def test_verified_completion_closes_open_plan_steps(run_worker, reset_sandbox):
+    reset_sandbox("off")
+
+    def worker(t: Transcript):
+        if t.turns() == 0:
+            return turn(call("update_plan", steps=[{"step": "a", "status": "done"}, {"step": "b", "status": "in_progress"},
+                                                   {"step": "c", "status": "pending"}, {"step": "d", "status": "skipped"}]))
+        return turn(call("finish", status="completed", summary="ok", claims=["x"]))
+
+    def verifier(t: Transcript):
+        return turn(call("report_verdict", achieved=True, confidence="high", issues=[],
+                         checks=[{"check": "x", "passed": True, "evidence": "seen"}]))
+
+    result, rec = run_worker(ScriptedProvider(worker, verifier), ScriptedHumanChannel([]))
+    assert result.outcome == "completed_verified"
+    final_plan = [e.data["steps"] for e in rec.events if e.type == "plan"][-1]
+    assert [s["status"] for s in final_plan] == ["done", "done", "done", "skipped"]
+
+
+def test_unverified_run_keeps_plan_as_is(run_worker, reset_sandbox):
+    reset_sandbox("off")
+
+    def worker(t: Transcript):
+        if t.turns() == 0:
+            return turn(call("update_plan", steps=[{"step": "a", "status": "pending"}]))
+        return turn(call("finish", status="blocked", summary="need a human", claims=[]))
+
+    result, rec = run_worker(ScriptedProvider(worker), ScriptedHumanChannel([]))
+    assert [e.data["steps"] for e in rec.events if e.type == "plan"][-1][0]["status"] == "pending"

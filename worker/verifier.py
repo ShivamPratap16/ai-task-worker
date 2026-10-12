@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from worker.browser import BrowserSession
 from worker.llm.base import LLMError, LLMProvider, ToolResult, ToolSpec, Usage
 from worker.prompts import VERIFIER_TASK, verifier_system
-from worker.tools import Tool, ToolContext, ToolExecutor, ToolOutcome, _schema, build_tools
+from worker.tools import Tool, ToolContext, ToolExecutor, ToolOutcome, _schema, build_tools, until_cancelled
 
 READ_ONLY_TOOLS = {"browser_navigate", "browser_click", "browser_type", "browser_select",
                    "browser_fill_credential", "browser_back", "browser_snapshot", "read_document", "list_downloads"}
@@ -67,7 +67,7 @@ class Verifier:
         browser: BrowserSession = await worker_ctx.browser.fork(rec.downloads_dir, rec.screenshots_dir)
         ctx = ToolContext(settings=worker_ctx.settings, browser=browser, recorder=rec, human=worker_ctx.human,
                           memory=worker_ctx.memory.__class__(), lessons=worker_ctx.lessons, vault=worker_ctx.vault,
-                          read_only=True, actor="verifier")
+                          read_only=True, actor="verifier", cancel=worker_ctx.cancel)
         tools = {name: t for name, t in build_tools().items() if name in READ_ONLY_TOOLS}
         tools["report_verdict"] = VERDICT_TOOL
         executor = ToolExecutor(ctx, tools)
@@ -84,7 +84,7 @@ class Verifier:
         rec.emit("verification_started", actor="verifier")
         try:
             for _ in range(self.max_steps):
-                turn = await convo.complete()
+                turn = await until_cancelled(convo.complete(), worker_ctx.cancel)
                 usage.add(turn.usage)
                 if turn.text or turn.reasoning:
                     rec.emit("thought", actor="verifier", text=turn.text, reasoning=turn.reasoning)

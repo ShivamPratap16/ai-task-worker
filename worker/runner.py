@@ -12,11 +12,12 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+from pathlib import Path
 
 from worker.agent import RunResult, Worker
 from worker.config import Settings
-from worker.events import RunRecorder
+from worker.events import RunRecorder, StoredRecorder
 from worker.human import WebHumanChannel
 
 
@@ -32,10 +33,29 @@ class RunHandle:
     created: float = field(default_factory=time.time)
     thread: threading.Thread | None = None
 
+    @classmethod
+    def from_disk(cls, run_dir: Path) -> "RunHandle | None":
+        recorder = StoredRecorder.load(run_dir)
+        if not recorder.events or recorder.events[0].type != "run_started":
+            return None
+        task = recorder.events[0].data.get("task", "")
+        final = recorder.events[-1].data
+        known = {f.name for f in fields(RunResult)} - {"run_id", "task"}
+        result = RunResult(run_id=run_dir.name, task=task,
+                           **{"outcome": "error", "summary": "", **{k: v for k, v in final.items() if k in known}})
+        return cls(run_dir.name, task, recorder, WebHumanChannel(), status="finished", result=result,
+                   created=recorder.events[0].ts)
+
     def summary(self) -> dict:
+        r = self.result
+        usage = (r.usage or {}) if r else {}
         return {"run_id": self.run_id, "task": self.task, "status": self.status, "created": self.created,
-                "outcome": self.result.outcome if self.result else None,
-                "pending": [vars(r) for r in self.human.pending()]}
+                "outcome": r.outcome if r else None,
+                "pending": [vars(q) for q in self.human.pending()],
+                # for the overview dashboard
+                "steps": r.steps if r else None, "duration_s": r.duration_s if r else None,
+                "tokens": (usage.get("input_tokens", 0) + usage.get("output_tokens", 0)) if r else None,
+                "model": r.model if r else None}
 
 
 def new_event_loop() -> asyncio.AbstractEventLoop:
@@ -74,6 +94,25 @@ class RunManager:
         handle.thread = threading.Thread(target=target, name=f"run-{run_id}", daemon=True)
         handle.thread.start()
         return handle
+
+    def load_history(self) -> None:
+        """Bring back finished runs from runs/*/trace.jsonl (the trace is the source of truth)."""
+        if not self.settings.runs_dir.exists():
+            return
+        for trace in self.settings.runs_dir.glob("*/trace.jsonl"):
+            if trace.parent.name in self.runs:
+                continue
+            try:
+                handle = RunHandle.from_disk(trace.parent)
+            except (OSError, ValueError, KeyError, TypeError):
+                continue  # a damaged trace must not stop the dashboard
+            if handle:
+                self.runs[handle.run_id] = handle
+
+    def cancel(self, run_id: str) -> None:
+        handle = self.runs[run_id]
+        handle.cancel.set()
+        handle.human.close()  # release any approval or question the worker is waiting on
 
     def get(self, run_id: str) -> RunHandle | None:
         return self.runs.get(run_id)

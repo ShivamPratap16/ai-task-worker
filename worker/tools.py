@@ -16,6 +16,7 @@ agent loop does not change.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,31 @@ class PolicyBlocked(Exception):
     pass
 
 
+class RunCancelled(Exception):
+    """The operator stopped the run. Propagates straight out of the loop (never becomes an observation)."""
+
+
+async def until_cancelled(awaitable, cancel: threading.Event):
+    """Await something slow (an LLM call, a rate-limit wait) but give up promptly if the run is cancelled."""
+    task = asyncio.ensure_future(awaitable)
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=0.5)
+        if done:
+            return task.result()
+        if cancel.is_set():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise RunCancelled()
+
+
+async def _evidence(ctx: "ToolContext", label: str) -> str | None:
+    """Screenshot for the human, best effort: evidence capture must never break the run."""
+    try:
+        return (await ctx.browser.screenshot(label)).name if ctx.browser.page is not None else None
+    except Exception:
+        return None
+
+
 @dataclass
 class ToolContext:
     settings: Settings
@@ -60,6 +86,8 @@ class ToolContext:
     approvals_granted: int = 0
     approvals_denied: int = 0
     mutations: list[dict] = field(default_factory=list)  # data-changing actions, for the verifier
+    cancel: threading.Event = field(default_factory=threading.Event)
+    plan_approved: bool = False     # plan review mode: set once the operator approves the plan
 
     async def request_approval(self, action: str, reason: str) -> None:
         """Block until a human approves; raise PolicyBlocked on denial."""
@@ -67,8 +95,11 @@ class ToolContext:
             raise PolicyBlocked(f"read-only mode: {reason}")
         req = HumanRequest(kind="approval", question=f"The worker wants to: {action}",
                            context={"reason": reason, "page": self.browser.page.url})
-        self.recorder.emit("approval_requested", actor=self.actor, request_id=req.id, action=action, reason=reason)
+        self.recorder.emit("approval_requested", actor=self.actor, request_id=req.id, action=action, reason=reason,
+                           screenshot=await _evidence(self, f"{self.actor}-approval"), url=self.browser.page.url)
         resp = await self.human.ask(req, self.settings.human_timeout_s)
+        if resp.cancelled:
+            raise RunCancelled()
         self.recorder.emit("approval_resolved", actor=self.actor, request_id=req.id, approved=bool(resp.approved),
                            note=resp.answer, responder=resp.responder)
         if not resp.approved:
@@ -222,7 +253,27 @@ async def list_downloads(ctx: ToolContext, args: dict) -> ToolOutcome:
 async def update_plan(ctx: ToolContext, args: dict) -> ToolOutcome:
     ctx.plan = [{"step": s.get("step", ""), "status": s.get("status", "pending")} for s in args["steps"]]
     ctx.recorder.emit("plan", actor=ctx.actor, steps=ctx.plan)
-    return ToolOutcome("Plan recorded.")
+    if not ctx.settings.plan_review or ctx.plan_approved:
+        return ToolOutcome("Plan recorded.")
+    # Plan review mode: the operator approves (or redirects) the plan before the worker may act.
+    req = HumanRequest(kind="plan_review", question="Review the worker's plan before it starts",
+                       context={"page": ctx.browser.page.url})
+    ctx.recorder.emit("question", actor=ctx.actor, request_id=req.id, kind="plan_review", question=req.question,
+                      options=[], steps=ctx.plan)
+    resp = await ctx.human.ask(req, ctx.settings.human_timeout_s)
+    ctx.recorder.emit("answer", actor=ctx.actor, request_id=req.id, answer=resp.answer, approved=resp.approved,
+                      responder=resp.responder)
+    if resp.cancelled:
+        raise RunCancelled()
+    if resp.timed_out:
+        return ToolOutcome("Nobody approved the plan in time. Do not act; finish with status 'blocked'.",
+                           is_error=True, error_kind="human_timeout")
+    if resp.approved:
+        ctx.plan_approved = True
+        note = resp.answer if resp.answer not in ("", "approved") else ""
+        return ToolOutcome("Plan recorded. The operator APPROVED it; go ahead." + (f" Operator note: {note}" if note else ""))
+    return ToolOutcome(f"The operator did NOT approve this plan and asked for changes: {resp.answer}\n"
+                       "Revise the plan accordingly and call update_plan again.")
 
 
 async def remember(ctx: ToolContext, args: dict) -> ToolOutcome:
@@ -242,10 +293,13 @@ async def ask_human(ctx: ToolContext, args: dict) -> ToolOutcome:
     kind = args.get("kind", "clarification")
     req = HumanRequest(kind=kind, question=args["question"], options=args.get("options") or [],
                        context={"page": ctx.browser.page.url})
-    ctx.recorder.emit("question", actor=ctx.actor, request_id=req.id, kind=kind, question=req.question, options=req.options)
+    ctx.recorder.emit("question", actor=ctx.actor, request_id=req.id, kind=kind, question=req.question, options=req.options,
+                      screenshot=await _evidence(ctx, f"{ctx.actor}-question"))
     resp = await ctx.human.ask(req, ctx.settings.human_timeout_s)
     ctx.recorder.emit("answer", actor=ctx.actor, request_id=req.id, answer=resp.answer, approved=resp.approved,
                       responder=resp.responder)
+    if resp.cancelled:
+        raise RunCancelled()
     if resp.timed_out:
         return ToolOutcome("No human answered in time. Do not proceed with the uncertain part; finish with "
                            "status 'blocked' explaining what you need.", is_error=True, error_kind="human_timeout")
@@ -330,6 +384,9 @@ def build_tools() -> dict[str, Tool]:
     return {t.spec.name: t for t in tools}
 
 
+PLAN_REVIEW_ALLOWED = {"update_plan", "remember", "ask_human", "finish"}
+
+
 def _validate(spec: ToolSpec, args: dict) -> str | None:
     props, required = spec.parameters.get("properties", {}), spec.parameters.get("required", [])
     missing = [r for r in required if r not in args]
@@ -371,6 +428,9 @@ class ToolExecutor:
                                   True, "bad_arguments")
         elif (problem := _validate(tool.spec, call.arguments)) is not None:
             outcome = ToolOutcome(f"Invalid arguments for {call.name}: {problem}", True, "bad_arguments")
+        elif ctx.settings.plan_review and not ctx.read_only and not ctx.plan_approved                 and call.name not in PLAN_REVIEW_ALLOWED:
+            outcome = ToolOutcome("Plan review is on: first record your complete plan with update_plan. The operator "
+                                  "must approve it before you take any action.", True, "plan_not_approved")
         else:
             outcome = await self._run_with_retries(tool, call)
 
@@ -390,6 +450,8 @@ class ToolExecutor:
         for attempt in range(1, attempts + 1):
             try:
                 return await tool.fn(self.ctx, call.arguments)
+            except RunCancelled:
+                raise
             except PolicyBlocked as exc:
                 self.ctx.recorder.emit("policy_block", actor=self.ctx.actor, tool=call.name, reason=str(exc))
                 return ToolOutcome(f"BLOCKED by policy: {exc}", True, "policy_blocked")

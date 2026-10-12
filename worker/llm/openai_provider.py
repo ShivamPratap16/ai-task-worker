@@ -24,12 +24,17 @@ import openai
 
 from worker.llm.base import (AssistantTurn, Conversation, LLMError, LLMProvider, ToolCall,
                              ToolResult, ToolSpec, Usage)
+from worker.quota import QuotaLedger, human_duration, parse_quota_error
 
-KEEP_RECENT_TOOL_OUTPUTS = 4
+# Only the newest page snapshots matter for the next action; older ones are cut to their first lines.
+# Every request resends the whole history, so this is the main lever on tokens per request.
+KEEP_RECENT_TOOL_OUTPUTS = 2
 ELIDE_OVER_CHARS = 1200
 RATE_LIMIT_WAITS_S = (20, 40, 60)   # waits after a per-minute 429, beyond the SDK's own short retries
 DAILY_QUOTA_MARKERS = ("insufficient_quota", "credit_balance_exhausted", "perday", "per day", "per_day",
                        "requests per day", "daily")
+# Gemini accepts this documented placeholder where a thought signature came from a different model.
+DUMMY_THOUGHT_SIGNATURE = {"google": {"thought_signature": "skip_thought_signature_validator"}}
 
 
 class RateLimiter:
@@ -115,8 +120,13 @@ class OpenAIConversation(Conversation):
         native_calls = []
         for tc in msg.tool_calls or []:
             call_id = tc.id or f"call_{uuid.uuid4().hex[:12]}"   # some compatible servers omit ids
-            native_calls.append({"id": call_id, "type": "function",
-                                 "function": {"name": tc.function.name, "arguments": tc.function.arguments or "{}"}})
+            native = {"id": call_id, "type": "function",
+                      "function": {"name": tc.function.name, "arguments": tc.function.arguments or "{}"}}
+            # Gemini 3+ attaches a thought signature here and rejects the next request without it.
+            extra = (getattr(tc, "model_extra", None) or {}).get("extra_content")
+            if extra:
+                native["extra_content"] = extra
+            native_calls.append(native)
             try:
                 args = json.loads(tc.function.arguments or "{}")
                 calls.append(ToolCall(id=call_id, name=tc.function.name,
@@ -146,39 +156,90 @@ class OpenAIConversation(Conversation):
 
 class OpenAIProvider(LLMProvider):
     def __init__(self, model: str, *, name: str = "openai", api_key: str | None = None,
-                 base_url: str | None = None, reasoning_effort: str = "", rpm: int = 0, sanitize: bool = False):
+                 base_url: str | None = None, reasoning_effort: str = "", rpm: int = 0, sanitize: bool = False,
+                 fallback_models: list[str] | None = None, ledger: QuotaLedger | None = None):
         self.name = name
-        self.model = model
         self.reasoning_effort = reasoning_effort
         self.sanitize = sanitize
+        self.base_url, self.rpm = base_url, rpm
+        self.ledger = ledger
+        self.notices: list[dict] = []
         self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=2, timeout=300.0)
-        self.limiter = RateLimiter.for_key(f"{base_url}|{model}", rpm)
+        # Start on the first model that is not known to be out of quota today.
+        candidates = [model] + list(fallback_models or [])
+        usable = [m for m in candidates if not (ledger and ledger.exhausted(m))]
+        self._queue = usable or candidates
+        self._use(self._queue.pop(0))
+        if self.model != model:
+            self.notices.append({"from": model, "to": self.model,
+                                 "reason": f"{model} has no quota left today"})
+
+    def _use(self, model: str) -> None:
+        self.model = model
+        self.limiter = RateLimiter.for_key(f"{self.base_url}|{model}", self.rpm)
+
+    def drain_notices(self) -> list[dict]:
+        notices, self.notices = self.notices, []
+        return notices
+
+    def _switch_model(self, messages: list, reason: str) -> bool:
+        """Move to the next fallback model, if any. History is kept; the old model's signatures are neutralised."""
+        if not self._queue:
+            return False
+        old = self.model
+        self._use(self._queue.pop(0))
+        for m in messages:
+            for tc in m.get("tool_calls") or []:
+                if "extra_content" in tc:
+                    tc["extra_content"] = DUMMY_THOUGHT_SIGNATURE
+        self.notices.append({"from": old, "to": self.model, "reason": reason})
+        return True
 
     def conversation(self, system: str, tools: list[ToolSpec]) -> Conversation:
         return OpenAIConversation(self, system, tools)
 
     async def create(self, messages, tools):
-        kwargs: dict = dict(model=self.model, messages=messages, tools=tools)
-        if self.reasoning_effort:
-            kwargs["reasoning_effort"] = self.reasoning_effort
-        for attempt in range(len(RATE_LIMIT_WAITS_S) + 1):
+        attempt = 0
+        while True:
+            kwargs: dict = dict(model=self.model, messages=messages, tools=tools)
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
             await self.limiter.acquire()
             try:
-                return await self.client.chat.completions.create(**kwargs)
+                response = await self.client.chat.completions.create(**kwargs)
+                if self.ledger:
+                    self.ledger.record(self.model)
+                return response
             except openai.AuthenticationError as exc:
                 raise LLMError(f"{self.name}: authentication failed - check the API key", fatal=True) from exc
             except openai.RateLimitError as exc:
-                text = str(exc).lower().replace(" ", "")
+                raw = str(exc)
+                text = raw.lower().replace(" ", "")
                 if any(marker.replace(" ", "") in text for marker in DAILY_QUOTA_MARKERS):
-                    raise LLMError(f"{self.name}: quota exhausted (daily limit or no credit). "
-                                   f"Details: {str(exc)[:300]}", fatal=True) from exc
+                    info = parse_quota_error(raw)
+                    if self.ledger:
+                        self.ledger.mark_exhausted(self.model, info.get("limit"), info.get("retry_s"))
+                    reason = self._quota_message(info)
+                    if self._switch_model(messages, reason):
+                        continue
+                    raise LLMError(f"{reason}. No fallback model has quota left.", fatal=True) from exc
                 if attempt == len(RATE_LIMIT_WAITS_S):
-                    raise LLMError(f"{self.name}: still rate limited after waiting: {str(exc)[:300]}") from exc
+                    raise LLMError(f"{self.name}: still rate limited after waiting: {raw[:300]}") from exc
                 await asyncio.sleep(RATE_LIMIT_WAITS_S[attempt])  # per-minute limit: wait it out
+                attempt += 1
             except openai.NotFoundError as exc:
+                if self._switch_model(messages, f"model {self.model!r} is not available for this key"):
+                    continue
                 raise LLMError(f"{self.name}: model {self.model!r} not found for this key/endpoint", fatal=True) from exc
             except openai.BadRequestError as exc:
                 raise LLMError(f"{self.name} rejected the request: {str(exc)[:500]}", fatal=True) from exc
             except openai.APIError as exc:
                 raise LLMError(f"{self.name} API error: {str(exc)[:300]}") from exc
-        raise LLMError("unreachable")
+
+    def _quota_message(self, info: dict) -> str:
+        msg = f"{self.name}: the quota for {self.model} is used up"
+        if info.get("limit"):
+            msg += f" ({info['limit']} requests/day on this tier)"
+        if info.get("retry_s"):
+            msg += f"; it resets in about {human_duration(info['retry_s'])}"
+        return msg

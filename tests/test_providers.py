@@ -18,9 +18,13 @@ TOOL = ToolSpec("ping", "Echo.", {"type": "object", "properties": {"m": {"type":
 
 
 @pytest.fixture
-def env(monkeypatch):
+def env(monkeypatch, tmp_path):
     for k in KEYS:
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("LLM_FALLBACK_MODELS", raising=False)
+    # Keep the real runs/quota.json (today's exhausted models) from steering model selection in tests.
+    from worker.quota import QuotaLedger
+    monkeypatch.setattr(QuotaLedger, "shared", classmethod(lambda cls, path: cls(tmp_path / "quota.json")))
     return monkeypatch
 
 
@@ -46,7 +50,7 @@ def test_no_keys_gives_actionable_error(env):
 def test_gemini_uses_compatible_endpoint_and_rate_limit(env):
     env.setenv("GEMINI_API_KEY", "x")
     p = make_provider(Settings())
-    assert p.name == "gemini" and p.model == "gemini-2.5-flash"
+    assert p.name == "gemini" and p.model == "gemini-3.1-flash-lite"
     assert "generativelanguage.googleapis.com" in str(p.client.base_url)
     assert p.limiter.rpm == 8 and p.sanitize
 

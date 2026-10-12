@@ -91,6 +91,10 @@ class LLMProvider(ABC):
     @abstractmethod
     def conversation(self, system: str, tools: list[ToolSpec]) -> Conversation: ...
 
+    def drain_notices(self) -> list[dict]:
+        """Things the operator should know about, e.g. a switch to a fallback model."""
+        return []
+
     async def aclose(self) -> None:
         """Release network resources (HTTP connection pools)."""
         client = getattr(self, "client", None)

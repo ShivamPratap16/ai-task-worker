@@ -23,7 +23,7 @@ from worker.human import HumanChannel
 from worker.llm import LLMError, LLMProvider, ToolResult, Usage, make_provider
 from worker.memory import LessonStore, Vault, WorkingMemory, load_company_context
 from worker.prompts import worker_system
-from worker.tools import ToolContext, ToolExecutor, build_tools
+from worker.tools import RunCancelled, ToolContext, ToolExecutor, build_tools, until_cancelled
 from worker.verifier import Verdict, Verifier
 
 STALL_REPEATS = 3          # identical action this many times in a row -> intervene
@@ -77,7 +77,7 @@ class Worker:
                                  headless=s.headless)
         await browser.start()
         ctx = ToolContext(settings=s, browser=browser, recorder=recorder, human=human,
-                          memory=WorkingMemory(), lessons=lessons, vault=vault)
+                          memory=WorkingMemory(), lessons=lessons, vault=vault, cancel=cancel)
         executor = ToolExecutor(ctx, build_tools())
         verifier = Verifier(self.provider, company, s.verifier_max_steps, today)
         convo = self.provider.conversation(worker_system(company, lessons.load(), vault.ids(), today),
@@ -90,9 +90,13 @@ class Worker:
         try:
             await browser.navigate(s.start_url)
             first = await browser.snapshot()
-            convo.add_user_text(f"TASK FROM YOUR COLLEAGUE:\n{task}\n\nThe browser is open at the intranet home page:\n\n"
-                                f"{first.render()}")
+            review = ("\n\nPLAN REVIEW IS ON: start by recording your complete plan with update_plan. Your operator "
+                      "must approve it before you can take any other action." if s.plan_review else "")
+            convo.add_user_text(f"TASK FROM YOUR COLLEAGUE:\n{task}{review}\n\nThe browser is open at the intranet "
+                                f"home page:\n\n{first.render()}")
             await self._loop(task, convo, ctx, executor, verifier, usage, cancel, result)
+        except RunCancelled:
+            result.outcome, result.summary = "cancelled", "Run cancelled by the operator."
         except LLMError as exc:
             result.outcome, result.summary = "error", f"The language model was unavailable: {exc}"
             recorder.emit("error", where="llm", message=str(exc))
@@ -103,6 +107,11 @@ class Worker:
             await browser.close()
             await self.provider.aclose()
 
+        # The auditor confirmed the outcome, so steps the model forgot to tick off are done.
+        if result.outcome == "completed_verified" and any(s["status"] in ("pending", "in_progress") for s in ctx.plan):
+            ctx.plan = [{**s, "status": "done" if s["status"] in ("pending", "in_progress") else s["status"]}
+                        for s in ctx.plan]
+            recorder.emit("plan", actor="worker", steps=ctx.plan)
         result.facts = dict(ctx.memory.facts)
         result.duration_s = round(time.time() - started, 1)
         result.usage = asdict(usage)
@@ -112,17 +121,23 @@ class Worker:
         (recorder.run_dir / "report.md").write_text(render_report(result), encoding="utf-8")
         return result
 
-    async def _complete(self, convo, usage: Usage):
-        """One LLM turn, with a couple of loop-level retries on top of the SDK's own."""
+    async def _complete(self, convo, usage: Usage, ctx: ToolContext):
+        """One LLM turn, with a couple of loop-level retries on top of the SDK's own. Cancellable throughout."""
         for attempt in range(3):
             try:
-                turn = await convo.complete()
+                turn = await until_cancelled(convo.complete(), ctx.cancel)
                 usage.add(turn.usage)
                 return turn
             except LLMError as exc:
                 if exc.fatal or attempt == 2:
                     raise
-                await asyncio.sleep(3 * (attempt + 1))
+                await until_cancelled(asyncio.sleep(3 * (attempt + 1)), ctx.cancel)
+            finally:
+                self._report_notices(ctx)
+
+    def _report_notices(self, ctx: ToolContext) -> None:
+        for notice in self.provider.drain_notices():
+            ctx.recorder.emit("model_switched", **notice)
 
     async def _loop(self, task, convo, ctx: ToolContext, executor: ToolExecutor, verifier: Verifier,
                     usage: Usage, cancel: threading.Event, result: RunResult) -> None:
@@ -135,7 +150,7 @@ class Worker:
             if cancel.is_set():
                 result.outcome, result.summary = "cancelled", "Run cancelled by the operator."
                 return
-            turn = await self._complete(convo, usage)
+            turn = await self._complete(convo, usage, ctx)
             rec.emit("usage", input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
                      cache_read_tokens=usage.cache_read_tokens)
             if turn.text or turn.reasoning:
@@ -147,7 +162,9 @@ class Worker:
                     result.outcome = "failed"
                     result.summary = turn.text or "The worker stopped without completing or reporting."
                     return
-                convo.add_user_text("You did not call a tool. Continue the task with your tools; when you are "
+                messages = ctx.human.drain_messages()
+                convo.add_user_text("".join(f"MESSAGE FROM YOUR OPERATOR: {m}\n" for m in messages) +
+                                    "You did not call a tool. Continue the task with your tools; when you are "
                                     "done or blocked, call finish.")
                 continue
             idle_turns = 0
@@ -155,6 +172,8 @@ class Worker:
             results: list[ToolResult] = []
             finish_args = None
             for call in turn.tool_calls:
+                if cancel.is_set():
+                    raise RunCancelled()
                 if call.name == "finish" and finish_args is None:
                     outcome = await executor.execute(call)
                     if outcome.is_error:
@@ -171,6 +190,7 @@ class Worker:
             notes: list[str] = []
             if finish_args is not None:
                 verdict = await self._verify_if_needed(task, ctx, verifier, finish_args, usage, verification_rounds)
+                self._report_notices(ctx)
                 if verdict is not None:
                     verification_rounds += 1
                     rec.emit("verification", round=verification_rounds, **verdict.to_dict())
@@ -196,6 +216,9 @@ class Worker:
                              "system is unavailable or you are blocked, finish with status 'blocked' and explain.")
                 rec.emit("stall_detected", action="consecutive_errors")
                 consecutive_errors = 0
+            if messages := ctx.human.drain_messages():
+                notes.insert(0, "MESSAGE FROM YOUR OPERATOR (it takes priority over earlier instructions where they "
+                                "conflict):\n" + "\n".join(f"- {m}" for m in messages))
             remaining = s.max_steps - step
             if remaining == 5:
                 notes.append("OPERATOR NOTE: 5 steps of budget left. Wrap up: verify what you have done and "
