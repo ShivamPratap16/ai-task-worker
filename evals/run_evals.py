@@ -76,12 +76,17 @@ def run_one(task, chaos: str, seed: int, settings: Settings) -> dict:
 
 
 def _verdict(row: dict) -> str:
-    return "PASS" if row["passed"] else "OUTAGE" if row["provider_outage"] else "FAIL"
+    if row["passed"]:
+        return "PASS"
+    return {"outage": "OUTAGE", "quota": "NO QUOTA"}.get(row["provider_outage"] or "", "FAIL")
 
 
-def _provider_outage(result: dict) -> bool:
-    """The run ended because the LLM was unreachable: that grades the network, not the agent."""
-    return result["outcome"] == "error" and result["summary"].startswith("The language model was unavailable")
+def _provider_outage(result: dict) -> str | None:
+    """'outage' or 'quota' if the run ended because the LLM could not serve it: that grades the provider, not
+    the agent. An outage is worth one re-run; an exhausted daily quota is not."""
+    if result["outcome"] != "error" or not result["summary"].startswith("The language model was unavailable"):
+        return None
+    return "quota" if "quota" in result["summary"].lower() else "outage"
 
 
 def main() -> int:
@@ -113,7 +118,7 @@ def main() -> int:
             print(f"[{rep + 1}/{args.repeat}] {task.id} ...", flush=True)
             row = run_one(task, args.chaos, args.seed + rep, settings)
             for _ in range(args.outage_retries):
-                if not row["provider_outage"]:
+                if row["provider_outage"] != "outage":
                     break
                 print("    provider outage; re-running the task", flush=True)
                 row = run_one(task, args.chaos, args.seed + rep, settings) | {"rerun_after_outage": True}
@@ -131,12 +136,13 @@ def main() -> int:
 
     n = len(rows)
     passed = sum(r["passed"] for r in rows)
-    outages = sum(r["provider_outage"] for r in rows)
+    outages = sum(bool(r["provider_outage"]) for r in rows)
     judged = [r for r in rows if r["verifier_agrees"] is not None]
     lines = [f"# Eval results {stamp}", "",
              f"Model: {settings.model_label()} | chaos: {args.chaos} | seed: {args.seed} | runs: {n}", "",
              f"**Pass rate: {passed}/{n}**"
-             + (f" ({outages} lost to LLM provider outages; {passed}/{n - outages} of runs that reached the model)"
+             + (f" ({outages} not run: LLM provider outage or daily quota; {passed}/{n - outages} of runs that reached "
+                f"the model)"
                 if outages else "")
              + f"  |  verifier agreement with ground truth: {sum(r['verifier_agrees'] for r in judged)}/{len(judged)}",
              "",

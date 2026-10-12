@@ -277,3 +277,16 @@ every data-entry task faster and cheaper: fewer LLM requests, less context, less
 **Cost.** One more tool for the model to choose from (the single-field tools stay for search boxes and
 corrections). A partly filled form after a failure is reported, not rolled back; the form is only saved by
 an explicit submit, so nothing reaches the system of record.
+
+### D26. A step budget of 80, changed after seeing a result (stated plainly)
+**Decision.** The default step budget is 80 (was 60). The eval harness labels a run the LLM could not serve
+as `OUTAGE` (re-run once) or `NO QUOTA` (daily quota used up; not re-run, since it cannot succeed).
+**Why.** With D25 in place, the batch task did all of its work correctly under four injected faults (three
+503s on save and an expired session): three invoices, right values, no duplicates. It then ran out of steps
+on its final verification click. 60 was a guess made for one-invoice tasks; three invoices plus re-entry
+after faults plus reading three PDFs legitimately needs more. I am stating that this was changed after a run,
+because tuning a limit until an eval passes is exactly what an eval reviewer should be suspicious of. The
+evidence that it is not hiding a problem is in the trace (`python -m worker inspect eval-log_all_missing-005315`):
+no wasted loops, every extra step is fault recovery. The "5 steps left: wrap up" guard and the stall detector
+still bound a run that really is lost.
+**Cost.** A lost run can now spend up to 20 more LLM requests before it stops.

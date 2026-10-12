@@ -69,7 +69,7 @@ class Settings:
     record: str = ""                       # LLM_RECORD: cassette file, directory, or "1" (= cassettes/)
     cassette: str = ""                     # LLM_CASSETTE: the cassette WORKER_PROVIDER=replay plays back
     # Agent loop budgets
-    max_steps: int = 60
+    max_steps: int = 80
     max_verification_rounds: int = 2
     verifier_max_steps: int = 25
     tool_retry_attempts: int = 3
