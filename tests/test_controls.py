@@ -190,3 +190,26 @@ def test_api_refuses_cross_origin_writes():
     assert evil.status_code == 403
     same = client.post("/api/runs", json={"task": ""}, headers={"Origin": "http://testserver"})
     assert same.status_code == 400  # passed the origin check, rejected for the empty task
+
+
+def test_api_accepts_same_host_behind_tls_proxy():
+    """A hosted demo is https at the proxy but plain http here; the origin check must still pass it."""
+    from fastapi.testclient import TestClient
+    from worker.server import app
+    client = TestClient(app)
+    proxied = client.post("/api/runs", json={"task": ""}, headers={"Origin": "https://testserver"})
+    assert proxied.status_code == 400
+
+
+def test_demo_password_gates_dashboard_and_api(monkeypatch):
+    from fastapi.testclient import TestClient
+    import worker.server as server
+    monkeypatch.setattr(server, "DEMO_PASSWORD", "s3cret")
+    client = TestClient(server.app)
+    assert client.get("/api/runs").status_code == 401
+    page = client.get("/", follow_redirects=False)
+    assert page.status_code == 303 and page.headers["location"] == "/login"
+    assert client.post("/login", data={"password": "wrong"}).status_code == 401
+    assert client.get("/api/runs").status_code == 401
+    client.post("/login", data={"password": "s3cret"}, follow_redirects=False)
+    assert client.get("/api/runs").status_code == 200

@@ -7,10 +7,14 @@ full history with no extra state.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import os
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -30,12 +34,57 @@ if (UI / "assets").is_dir():
 @app.middleware("http")
 async def same_origin_writes(request: Request, call_next):
     """Only the dashboard itself may start runs or answer approvals. Browsers attach an Origin header to
-    cross-site requests, so a web page in another tab cannot drive this local API."""
+    cross-site requests, so a web page in another tab cannot drive this local API. Hosts are compared without
+    the scheme: behind a TLS-terminating proxy (a hosted demo) the page is https but this server sees http."""
     origin = request.headers.get("origin")
     if request.method not in ("GET", "HEAD", "OPTIONS") and origin \
-            and origin.rstrip("/") != f"{request.url.scheme}://{request.headers.get('host', '')}":
+            and urlsplit(origin).netloc != request.headers.get("host", ""):
         return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
     return await call_next(request)
+
+
+# Hosted demo: with DEMO_PASSWORD set, everything sits behind a one-field sign-in, so a public URL cannot be used
+# to spend the LLM quota or answer approvals. Unset (local use), the dashboard is open as before.
+DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "")
+AUTH_COOKIE = "worker_demo_auth"
+LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>AI Task Worker</title><style>body{font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0}
+form{display:grid;gap:10px;width:260px}input,button{font:inherit;padding:8px}p{color:#b00;margin:0}</style></head>
+<body><form method="post" action="/login"><b>AI Task Worker demo</b>{error}
+<input type="password" name="password" placeholder="Demo password" autofocus>
+<button>Sign in</button></form></body></html>"""
+
+
+def _auth_token() -> str:
+    return hashlib.sha256(f"ai-task-worker:{DEMO_PASSWORD}".encode()).hexdigest()
+
+
+@app.middleware("http")
+async def demo_password(request: Request, call_next):
+    if not DEMO_PASSWORD or request.url.path == "/login" \
+            or hmac.compare_digest(request.cookies.get(AUTH_COOKIE, ""), _auth_token()):
+        return await call_next(request)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "sign in first"}, status_code=401)
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page():
+    return LOGIN_PAGE.replace("{error}", "")
+
+
+@app.post("/login")
+async def login(request: Request):
+    form = await request.form()
+    if not hmac.compare_digest(str(form.get("password", "")), DEMO_PASSWORD):
+        return HTMLResponse(LOGIN_PAGE.replace("{error}", "<p>Wrong password.</p>"), status_code=401)
+    https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    response = RedirectResponse("/", status_code=303)
+    # SameSite=None lets the cookie work when the demo is embedded in an iframe (Hugging Face Spaces page).
+    response.set_cookie(AUTH_COOKIE, _auth_token(), httponly=True, secure=https,
+                        samesite="none" if https else "lax", max_age=7 * 24 * 3600)
+    return response
 
 EXAMPLE_TASKS = [
     "Find the latest invoice from Globex, extract the amount and due date, enter it into our FinOps system, "
@@ -90,6 +139,8 @@ def start_run(body: StartRun):
         raise HTTPException(400, "task is empty")
     overrides = {k: v for k, v in {"approval_mode": body.approval_mode, "headless": body.headless,
                                    "plan_review": body.plan_review}.items() if v is not None}
+    if os.environ.get("WORKER_FORCE_HEADLESS", "").lower() in ("1", "true", "yes"):
+        overrides.pop("headless", None)  # hosted demo: no display to show a browser window on
     handle = manager.start(body.task.strip(), **overrides)
     return handle.summary()
 

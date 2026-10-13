@@ -6,3 +6,4 @@ sandbox/data/
 *.pyc
 .env
 frontend/node_modules/
+*.log

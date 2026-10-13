@@ -154,7 +154,7 @@ def cmd_inspect(args) -> int:
 
 def cmd_serve(args) -> int:
     import uvicorn
-    uvicorn.run("worker.server:app", host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run("worker.server:app", host=args.host, port=args.port, log_level="warning")
     return 0
 
 
@@ -178,6 +178,7 @@ def main() -> int:
     p_inspect.set_defaults(fn=cmd_inspect)
     p_serve = sub.add_parser("serve", help="start the dashboard")
     p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to accept outside connections (hosted demo)")
     p_serve.set_defaults(fn=cmd_serve)
     args = parser.parse_args()
     return args.fn(args)
