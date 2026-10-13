@@ -16,11 +16,14 @@ The worker then:
 
 It runs against **Acme Corp**, a sandboxed company with a shared AP mailbox and a "FinOps" ERP. The ERP is deliberately unreliable, because a prototype that only works on a happy path proves little.
 
-> **Demo video:** **TODO: add link** (not recorded yet)
+> **Demo video (9.5 min, captioned):** https://youtu.be/gx4pvMyYa1k. It covers the architecture, two live runs (one recovering from server errors, one asking a human for approval), safety and the results.
+
+[![AI Task Worker demo video](https://img.youtube.com/vi/gx4pvMyYa1k/hqdefault.jpg)](https://youtu.be/gx4pvMyYa1k)
 
 ### Five-minute tour for reviewers
 | If you want to see... | Do this |
 |---|---|
+| It working, without installing anything | [Watch the demo video](https://youtu.be/gx4pvMyYa1k) (9.5 min, captioned) |
 | A real model run, without an API key | `python -m sandbox`, then `python -m worker replay cassettes/eval-latest_invoice-164830.json --headed` ([details](#watch-a-recorded-run-without-an-api-key)) |
 | That the safety claims hold whatever the model does | `python -m pytest tests/test_injection.py tests/test_agent_loop.py` (no key; a scripted, fully persuaded model cannot get a payment through) |
 | How well it actually works | [Evaluation results](#results): 7 task types graded on the sandbox's real state, not on the agent's report |
