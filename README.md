@@ -121,21 +121,23 @@ fidelity line saying whether every turn saw exactly what the original model saw.
 
 Override the model with `LLM_MODEL=...`. The agent code is identical for all of them; only the adapter differs.
 
-### Hosted demo (Docker; Hugging Face Spaces)
-The `Dockerfile` runs the sandbox and the dashboard in one container, with only the dashboard exposed
-(port 7860). To publish your own copy:
+### Run it in Docker (self-hosting)
+There is **no public hosted instance**; the demo video shows it working. The worker needs a real Chromium and a
+long-lived process (about 2 GB of RAM), which free hosting tiers don't provide. To run it yourself, a `Dockerfile` puts
+the sandbox and the dashboard in one container, with only the dashboard exposed on port 7860:
 
-1. At [huggingface.co](https://huggingface.co), create a **New Space** with SDK **Docker**, template **Blank**.
-   (Docker Spaces now need a paid PRO account; the same image runs on any Docker host with about 2 GB of RAM.)
-2. In the Space's **Settings**, add the secrets `GEMINI_API_KEY` (or another provider's key) and
-   `DEMO_PASSWORD`, and the variables `WORKER_PROVIDER=gemini` and `LLM_MODEL=gemini-3.5-flash-lite`.
-3. Commit your changes, then run `bash deploy/huggingface/push.sh <hf-username>/<space-name>`. Use a Hugging Face
-   access token with write permission as the git password. The first build takes about 5–10 minutes.
-4. Open `https://<hf-username>-<space-name>.hf.space` and sign in with the demo password.
+```bash
+docker build -t ai-task-worker .
+docker run -p 7860:7860 --env-file .env -e DEMO_PASSWORD=choose-one ai-task-worker
+# open http://localhost:7860 and sign in with the demo password
+```
 
-The browser is always headless there (screenshots are in the timeline), and all visitors share one sandbox. See
-[D27](docs/DECISIONS.md) for the trade-offs. To try the image locally:
-`docker build -t ai-task-worker . && docker run -p 7860:7860 --env-file .env -e DEMO_PASSWORD=demo ai-task-worker`.
+The same image runs on any Docker host with about 2 GB of RAM: a VM (for example Oracle Cloud's free ARM instance),
+or a Hugging Face Docker Space (paid plan; `deploy/huggingface/` has the Space config and a push script). On a public
+URL, always set `DEMO_PASSWORD` so strangers can't spend your LLM quota or answer the worker's approval requests.
+In the container the browser is always headless (screenshots are in the timeline), and all users share one sandbox.
+I built the image and tested it locally, including replaying a full recorded run inside it. See
+[D27](docs/DECISIONS.md) for the trade-offs.
 
 ---
 
@@ -336,6 +338,8 @@ not as a statistically measured success rate (`--repeat N` gives that). Earlier 
 
 ## Known limitations
 
+- **No public hosted demo.** It needs about 2 GB of RAM and a real browser, more than free hosting tiers give. A Docker
+  image is ready for self-hosting (see [Run it in Docker](#run-it-in-docker-self-hosting)); the demo video shows it working.
 - **Text-only perception.** Canvas or image-only UIs (and scanned PDFs) can't be read. There is no vision fallback yet.
 - **Risk detection is pattern-based**: a submit is gated if its label *or* its form's endpoint path looks high-impact
   (pay, bank, submit, delete, reply...). A neutrally named endpoint behind a neutral label, or a JavaScript-only action

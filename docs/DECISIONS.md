@@ -291,9 +291,9 @@ no wasted loops, every extra step is fault recovery. The "5 steps left: wrap up"
 still bound a run that really is lost.
 **Cost.** A lost run can now spend up to 20 more LLM requests before it stops.
 
-### D27. Hosted demo: one container, password-gated, always headless
-**Decision.** A `Dockerfile` runs the sandbox and the dashboard in one container (Hugging Face Spaces, or any
-Docker host). Only the dashboard is exposed; the worker's browser reaches the sandbox on `127.0.0.1:8001` inside
+### D27. Docker image for self-hosting: one container, password-gated, always headless
+**Decision.** A `Dockerfile` runs the sandbox and the dashboard in one container, for any Docker host. It is
+tested locally but not deployed publicly: the submission's demo is a video. Only the dashboard is exposed; the worker's browser reaches the sandbox on `127.0.0.1:8001` inside
 the container, exactly as it does locally. With `DEMO_PASSWORD` set, every page and API call needs a one-field
 sign-in (an HttpOnly cookie). `WORKER_FORCE_HEADLESS` makes the server ignore the "show browser" option. The
 same-origin check now compares hosts without the scheme. Nothing the model sees changed.
@@ -305,5 +305,6 @@ worker's approval requests. The scheme-free origin check is needed because the h
 so the page is `https` while the server sees `http`; the host still has to match, so another site's page
 still cannot drive the API.
 **Cost.** One shared password, not per-user accounts or roles: anyone with it can approve actions in the demo.
-The hosted sandbox is shared by all visitors, so two simultaneous runs see each other's changes. The Space
-sleeps when idle, so the first visit takes about a minute.
+A hosted sandbox is shared by all visitors, so two simultaneous runs see each other's changes. No free host I
+found had enough memory (free tiers are about 512 MB; Hugging Face Docker Spaces need a paid plan), so there is
+no public URL.
