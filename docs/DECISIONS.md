@@ -298,7 +298,7 @@ the container, exactly as it does locally. With `DEMO_PASSWORD` set, every page 
 sign-in (an HttpOnly cookie). `WORKER_FORCE_HEADLESS` makes the server ignore the "show browser" option. The
 same-origin check now compares hosts without the scheme. Nothing the model sees changed.
 **Why.** The worker needs a real Chromium (about 1-2 GB of RAM) and a long-lived process, which rules out the
-usual free serverless hosts; a Docker Space gives that for free. Keeping both apps in one container means the
+usual serverless hosts; any Docker host provides it (a Hugging Face Docker Space needs a PRO account). Keeping both apps in one container means the
 allowlist, the start URL and the eval harness all stay unchanged. The password exists because the dashboard has
 no user accounts: a public URL would let anyone spend the free-tier quota (a few tasks a day) or answer the
 worker's approval requests. The scheme-free origin check is needed because the hosting proxy terminates TLS,

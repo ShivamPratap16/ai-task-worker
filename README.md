@@ -121,12 +121,12 @@ fidelity line saying whether every turn saw exactly what the original model saw.
 
 Override the model with `LLM_MODEL=...`. The agent code is identical for all of them; only the adapter differs.
 
-### Hosted demo (Hugging Face Spaces)
+### Hosted demo (Docker; Hugging Face Spaces)
 The `Dockerfile` runs the sandbox and the dashboard in one container, with only the dashboard exposed
 (port 7860). To publish your own copy:
 
-1. Create a free account at [huggingface.co](https://huggingface.co), then **New Space**, choose SDK **Docker**,
-   template **Blank**, hardware **CPU basic (free)**.
+1. At [huggingface.co](https://huggingface.co), create a **New Space** with SDK **Docker**, template **Blank**.
+   (Docker Spaces now need a paid PRO account; the same image runs on any Docker host with about 2 GB of RAM.)
 2. In the Space's **Settings**, add the secrets `GEMINI_API_KEY` (or another provider's key) and
    `DEMO_PASSWORD`, and the variables `WORKER_PROVIDER=gemini` and `LLM_MODEL=gemini-3.5-flash-lite`.
 3. Commit your changes, then run `bash deploy/huggingface/push.sh <hf-username>/<space-name>`. Use a Hugging Face
