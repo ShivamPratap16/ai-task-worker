@@ -18,7 +18,7 @@ It runs against **Acme Corp**, a sandboxed company with a shared AP mailbox and 
 
 > **Demo video (9.5 min, captioned):** https://youtu.be/gx4pvMyYa1k. It covers the architecture, two live runs (one recovering from server errors, one asking a human for approval), safety and the results.
 
-[![AI Task Worker demo video](https://img.youtube.com/vi/gx4pvMyYa1k/hqdefault.jpg)](https://youtu.be/gx4pvMyYa1k)
+[![Watch the AI Task Worker demo video](docs/demo-video.jpg)](https://youtu.be/gx4pvMyYa1k)
 
 ### Five-minute tour for reviewers
 | If you want to see... | Do this |
